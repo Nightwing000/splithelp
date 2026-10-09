@@ -52,37 +52,6 @@ class ExpenseRepository:
         payments: list[ExpensePayment],
         splits: list[ExpenseSplit],
     ) -> Expense:
-        # This is the one method in the whole repository layer where the
-        # transaction boundary is load-bearing, not just good practice.
-        # The DB trigger only checks sum(payments) == sum(splits) for a
-        # given expense_id, and it's deferred to COMMIT. That means:
-        #
-        #   - all three inserts (Expenses, then N ExpensePayments, then N
-        #     ExpenseSplits) need to happen inside ONE `with self.pool
-        #     .connection()` block, sharing one cursor or at least one
-        #     connection, so they commit or roll back together.
-        #   - if you open a fresh `with self.pool.connection()` per insert
-        #     instead of one for the whole method, each one commits on its
-        #     own exit -- the trigger would fire (and could reject) after
-        #     the Expenses insert alone, before payments/splits even exist.
-        #
-        # Questions to work through before you write the SQL:
-        #   - You need the new expense's id before you can insert payments
-        #     or splits (they have expense_id FKs). What's giving you that
-        #     id -- RETURNING on the first insert, like in UserRepository?
-        #   - Inserting N payments and N splits means N+N execute() calls
-        #     (or can you do a multi-row INSERT? look at psycopg's
-        #     executemany / execute_values-style options if you want that).
-        #   - If total_paid != total_owed, the trigger raises inside
-        #     Postgres. What actually happens to your Python code at that
-        #     point -- does execute() raise an exception you can catch? If
-        #     you wanted to turn that into your own UnbalancedExpenseError
-        #     instead of leaking a raw psycopg error, where would that
-        #     try/except need to sit relative to the `with` block? (Careful:
-        #     the trigger is DEFERRED -- it doesn't fire on the individual
-        #     execute() calls at all. It fires when the transaction tries
-        #     to commit. So which statement in your code is actually the
-        #     one that could raise it?)
         try:
             with self.pool.connection() as conn:
                 with conn.cursor() as cur:
@@ -128,8 +97,6 @@ class ExpenseRepository:
     def get_expense(self, expense_id: int) -> Expense | None:
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
-
-                # 1. Get the expense itself
                 cur.execute(
                     """
                     SELECT id, group_id, description, created_at
@@ -151,7 +118,6 @@ class ExpenseRepository:
                     created_at=row[3],
                 )
 
-                # 2. Get all payments for this expense
                 cur.execute(
                     """
                     SELECT id, expense_id, user_id, amount
@@ -173,7 +139,6 @@ class ExpenseRepository:
                     for row in payment_rows
                 ]
 
-                # 3. Get all splits for this expense
                 cur.execute(
                     """
                     SELECT id, expense_id, user_id, split_type, amount_owed
@@ -196,7 +161,6 @@ class ExpenseRepository:
                     for row in split_rows
                 ]
 
-                # 4. Put everything together
                 expense.payments = payments
                 expense.splits = splits
 
