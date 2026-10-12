@@ -1,28 +1,68 @@
+
 from decimal import Decimal
 
 from netting import Transaction, simplify_debts
 
 
 def test_already_settled_group():
-    # TODO: balances where everyone nets to 0 -- what should come back?
-    pass
+    balances = {
+        1: Decimal("0"),
+        2: Decimal("0"),
+        3: Decimal("0"),
+    }
+
+    result = simplify_debts(balances)
+
+    assert result == []
 
 
 def test_two_person_settle():
-    # TODO: one creditor, one debtor, amounts match exactly.
-    # Assert the exact Transaction(s) returned, not just the length.
-    pass
+    balances = {
+        1: Decimal("50"),
+        2: Decimal("-50"),
+    }
+
+    result = simplify_debts(balances)
+
+    assert result == [
+        Transaction(
+            payer_id=2,
+            payee_id=1,
+            amount=Decimal("50"),
+        )
+    ]
 
 
 def test_four_person_worked_example():
-    # TODO: the A:+40, B:+10, C:-30, D:-20 example from earlier.
-    # Assert the exact sequence: C->A 30, D->A 10, D->B 10.
-    pass
+    balances = {
+        1: Decimal("40"),   # A
+        2: Decimal("10"),   # B
+        3: Decimal("-30"),  # C
+        4: Decimal("-20"),  # D
+    }
+
+    result = simplify_debts(balances)
+
+    assert result == [
+        Transaction(3, 1, Decimal("30")),
+        Transaction(4, 1, Decimal("10")),
+        Transaction(4, 2, Decimal("10")),
+    ]
 
 
 def test_exact_tie_zeroes_both_sides_same_step():
-    # TODO: a creditor and debtor with equal magnitude, e.g. +15 / -15,
-    # so the transfer amount zeroes both out in the same loop iteration.
-    # This is the "two separate `if`s, not `elif`" branch in simplify_debts --
-    # make sure both actually get dropped, not just one.
-    pass
+    balances = {
+        1: Decimal("15"),
+        2: Decimal("-15"),
+    }
+
+    result = simplify_debts(balances)
+
+    assert result == [
+        Transaction(
+            payer_id=2,
+            payee_id=1,
+            amount=Decimal("15"),
+        )
+    ]
+

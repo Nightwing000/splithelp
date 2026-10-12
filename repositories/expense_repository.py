@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 
 import psycopg
 
@@ -208,3 +209,39 @@ class ExpenseRepository:
                     raise ExpenseNotFoundError(
                         f"Expense {expense_id} not found"
                     )
+
+    def get_group_balances(self, group_id: int) -> dict[int, Decimal]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COALESCE(payments.user_id, splits.user_id) AS user_id,
+                        COALESCE(payments.total_paid, 0)
+                        - COALESCE(splits.total_owed, 0) AS net_balance
+                    FROM (
+                        SELECT
+                            ep.user_id,
+                            SUM(ep.amount) AS total_paid
+                        FROM ExpensePayments ep
+                        JOIN Expenses e ON e.id = ep.expense_id
+                        WHERE e.group_id = %s
+                        GROUP BY ep.user_id
+                    ) payments
+
+                    FULL OUTER JOIN (
+                        SELECT
+                            es.user_id,
+                            SUM(es.amount_owed) AS total_owed
+                        FROM ExpenseSplits es
+                        JOIN Expenses e ON e.id = es.expense_id
+                        WHERE e.group_id = %s
+                        GROUP BY es.user_id
+                    ) splits ON splits.user_id = payments.user_id;
+                    """,
+                    (group_id, group_id),
+                )
+
+                rows = cur.fetchall()
+
+                return {user_id: net_balance for user_id, net_balance in rows}
