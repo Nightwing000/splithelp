@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 
-import google.generativeai as genai
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SCHEMA_PATH = "init/01_schema.sql"
+SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
 
 
 def _load_schema() -> str:
-    with open(SCHEMA_PATH, "r") as f:
+    with SCHEMA_PATH.open("r", encoding="utf-8") as f:
         return f.read()
 
 
@@ -37,6 +33,10 @@ def _extract_sql(text: str) -> str:
 
 
 def generate_sql(question: str) -> str:
+    import google.generativeai as genai
+    from dotenv import load_dotenv
+
+    load_dotenv()
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     model = genai.GenerativeModel("gemini-flash-latest")
     response = model.generate_content(build_prompt(question))

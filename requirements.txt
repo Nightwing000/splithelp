@@ -1,0 +1,7 @@
+# Runtime dependencies
+google-generativeai
+python-dotenv
+psycopg[binary]
+
+# Test dependencies
+pytest
