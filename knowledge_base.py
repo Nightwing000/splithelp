@@ -1,3 +1,13 @@
+from typing import Literal, TypedDict
+
+
+class KnowledgeItem(TypedDict):
+    id: str
+    kind: Literal["schema", "rule", "example"]
+    content: str
+    keywords: list[str]
+
+
 KNOWLEDGE_ITEMS = [
     {
         "id": "users",
@@ -110,3 +120,219 @@ KNOWLEDGE_ITEMS = [
         ],
     },
 ]
+
+
+BUSINESS_RULES = [
+    {
+        "id": "net_balance_calculation",
+        "kind": "rule",
+        "content": (
+            "A user's net balance within a group is calculated as "
+            "the sum of their ExpensePayments.amount across the group's "
+            "expenses minus the sum of their ExpenseSplits.amount_owed "
+            "across those same expenses. "
+            "Net balance = total paid - total owed. "
+            "Calculate payments and splits separately before combining "
+            "their totals to avoid multiplying rows in joins."
+        ),
+        "keywords": [
+            "balance", "net balance", "calculate balance",
+            "total paid", "total owed", "net position",
+            "owes", "owing", "group",
+        ],
+    },
+    {
+        "id": "positive_balance",
+        "kind": "rule",
+        "content": (
+            "A positive net balance means the user is owed money overall "
+            "and should receive money. It does not mean the user owes money."
+        ),
+        "keywords": [
+            "creditor", "receive", "receives", "owed money",
+            "positive balance", "who gets paid",
+        ],
+    },
+    {
+        "id": "negative_balance",
+        "kind": "rule",
+        "content": (
+            "A negative net balance means the user owes money overall "
+            "and must pay money to settle their balance. "
+            "The amount owed is the absolute value of the negative balance."
+        ),
+        "keywords": [
+            "debtor", "owes", "owing", "pay", "negative balance",
+            "who owes money", "amount owed",
+        ],
+    },
+    {
+        "id": "group_scoped_balances",
+        "kind": "rule",
+        "content": (
+            "Balances and settlements are calculated per group, not "
+            "across the entire application. Include only expenses belonging "
+            "to the requested group by joining Expenses.group_id to the "
+            "requested group. Do not combine expenses from unrelated groups."
+        ),
+        "keywords": [
+            "group balance", "group debts", "settlement",
+            "group_id", "group expenses", "who owes whom",
+        ],
+    },
+    {
+        "id": "expense_balance_invariant",
+        "kind": "rule",
+        "content": (
+            "For every existing expense, the sum of ExpensePayments.amount "
+            "must equal the sum of ExpenseSplits.amount_owed. "
+            "The database enforces this invariant using deferred constraint "
+            "triggers, which validate the final transaction state. "
+            "Do not interpret payment totals and split totals as unrelated "
+            "amounts when modifying an expense."
+        ),
+        "keywords": [
+            "balanced expense", "total paid", "total owed",
+            "payment total", "split total", "expense invariant",
+            "modify expense",
+        ],
+    },
+    {
+        "id": "active_users",
+        "kind": "rule",
+        "content": (
+            "A user is active when Users.deleted_at IS NULL. "
+            "When a question explicitly asks for active users, filter using "
+            "this condition. Soft-deleted users remain in the database "
+            "and may need to be included when querying historical expenses "
+            "or financial records."
+        ),
+        "keywords": [
+            "active users", "active members", "deleted users",
+            "soft delete", "current members",
+        ],
+    },
+    {
+        "id": "payments_and_splits_are_distinct",
+        "kind": "rule",
+        "content": (
+            "ExpensePayments and ExpenseSplits represent different concepts. "
+            "ExpensePayments records how much each user actually paid. "
+            "ExpenseSplits records how much each user owes for an expense. "
+            "Do not combine them into a single signed-ledger interpretation "
+            "or treat a payment as equivalent to an amount owed. "
+            "Compute their totals separately, then calculate net balance "
+            "as total paid minus total owed."
+        ),
+        "keywords": [
+            "payments versus splits", "amount paid", "amount owed",
+            "expense payments", "expense splits", "signed ledger",
+            "payer", "split",
+        ],
+    },
+]
+SQL_EXAMPLES = [
+    {
+        "id": "list_active_users",
+        "kind": "example",
+        "content": (
+            "Question: List all active users.\n"
+            "SQL:\n"
+            "SELECT id, name, email "
+            "FROM Users "
+            "WHERE deleted_at IS NULL "
+            "ORDER BY name;"
+        ),
+        "keywords": [
+            "users", "active", "people", "accounts",
+        ],
+    },
+    {
+        "id": "list_group_members",
+        "kind": "example",
+        "content": (
+            "Question: List the members of a group.\n"
+            "SQL:\n"
+            "SELECT u.id, u.name, u.email "
+            "FROM Users u "
+            "JOIN GroupMembers gm ON gm.user_id = u.id "
+            "WHERE gm.group_id = 1 AND u.deleted_at IS NULL "
+            "ORDER BY u.name;"
+        ),
+        "keywords": [
+            "members", "member", "belongs", "participants", "group",
+        ],
+    },
+    {
+        "id": "list_group_expenses",
+        "kind": "example",
+        "content": (
+            "Question: List the expenses in a group.\n"
+            "SQL:\n"
+            "SELECT id, description, created_at "
+            "FROM Expenses "
+            "WHERE group_id = 1 "
+            "ORDER BY created_at DESC;"
+        ),
+        "keywords": [
+            "expenses", "expense", "spending", "purchases", "group",
+        ],
+    },
+    {
+        "id": "group_payment_totals",
+        "kind": "example",
+        "content": (
+            "Question: How much did each user pay in a group?\n"
+            "SQL:\n"
+            "SELECT u.id, u.name, SUM(ep.amount) AS total_paid "
+            "FROM ExpensePayments ep "
+            "JOIN Expenses e ON e.id = ep.expense_id "
+            "JOIN Users u ON u.id = ep.user_id "
+            "WHERE e.group_id = 1 "
+            "GROUP BY u.id, u.name "
+            "ORDER BY total_paid DESC;"
+        ),
+        "keywords": [
+            "paid", "payment", "payments", "total", "payer", "group",
+        ],
+    },
+    {
+        "id": "group_net_balances",
+        "kind": "example",
+        "content": (
+            "Question: Show each user's net balance in a group.\n"
+            "SQL:\n"
+            "WITH payment_totals AS ("
+            "SELECT ep.user_id, SUM(ep.amount) AS total_paid "
+            "FROM ExpensePayments ep "
+            "JOIN Expenses e ON e.id = ep.expense_id "
+            "WHERE e.group_id = 1 "
+            "GROUP BY ep.user_id"
+            "), split_totals AS ("
+            "SELECT es.user_id, SUM(es.amount_owed) AS total_owed "
+            "FROM ExpenseSplits es "
+            "JOIN Expenses e ON e.id = es.expense_id "
+            "WHERE e.group_id = 1 "
+            "GROUP BY es.user_id"
+            ") "
+            "SELECT u.id, u.name, "
+            "COALESCE(pt.total_paid, 0) - COALESCE(st.total_owed, 0) "
+            "AS net_balance "
+            "FROM Users u "
+            "LEFT JOIN payment_totals pt ON pt.user_id = u.id "
+            "LEFT JOIN split_totals st ON st.user_id = u.id "
+            "JOIN GroupMembers gm ON gm.user_id = u.id "
+            "WHERE gm.group_id = 1 "
+            "ORDER BY net_balance DESC;"
+        ),
+        "keywords": [
+            "balance", "balances", "owes", "owed",
+            "settlement", "group", "net",
+        ],
+    },
+]
+
+
+ALL_KNOWLEDGE: list[KnowledgeItem] = (
+    KNOWLEDGE_ITEMS + BUSINESS_RULES + SQL_EXAMPLES
+)

@@ -23,6 +23,36 @@ def test_build_prompt_does_not_depend_on_current_working_directory(monkeypatch, 
     assert "CREATE TABLE Users" in prompt
 
 
+def test_build_prompt_includes_retrieved_context():
+    context = [
+        {
+            "id": "users",
+            "kind": "schema",
+            "content": "Users stores application user records.",
+            "keywords": ["users"],
+        },
+        {
+            "id": "active_users",
+            "kind": "rule",
+            "content": "Active users have deleted_at IS NULL.",
+            "keywords": ["active"],
+        },
+        {
+            "id": "list_active_users",
+            "kind": "example",
+            "content": "Question: List active users.\nSQL: SELECT ...",
+            "keywords": ["active", "users"],
+        },
+    ]
+
+    prompt = build_prompt("List active users", context)
+
+    assert "Relevant retrieved context:" in prompt
+    assert "[schema: users]" in prompt
+    assert "Active users have deleted_at IS NULL." in prompt
+    assert "Question: List active users." in prompt
+
+
 def test_extract_sql_removes_sql_code_fence():
     text = "```sql\nSELECT id FROM Users;\n```"
 
