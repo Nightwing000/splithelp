@@ -6,7 +6,7 @@ from pathlib import Path
 from collections.abc import Sequence
 
 from knowledge_base import KnowledgeItem
-from retrieval import retrieve
+from retrieval import retrieve_context
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
 
@@ -18,8 +18,19 @@ def _load_schema() -> str:
 
 def _format_retrieved_context(items: Sequence[KnowledgeItem]) -> str:
     sections = []
-    for item in items:
-        sections.append(f"[{item['kind']}: {item['id']}]\n{item['content']}")
+    headings = {
+        "schema": "Relevant schema",
+        "rule": "Relevant business rules",
+        "example": "Relevant SQL examples",
+    }
+    for kind, heading in headings.items():
+        matching_items = [item for item in items if item["kind"] == kind]
+        if matching_items:
+            entries = [
+                f"[{item['id']}]\n{item['content']}"
+                for item in matching_items
+            ]
+            sections.append(f"{heading}:\n" + "\n\n".join(entries))
     return "\n\n".join(sections)
 
 
@@ -59,7 +70,7 @@ def generate_sql(question: str) -> str:
     load_dotenv()
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     model = genai.GenerativeModel("gemini-flash-latest")
-    context = retrieve(question)
+    context = retrieve_context(question)
     prompt = build_prompt(question, context) if context else build_prompt(question)
     response = model.generate_content(prompt)
     return _extract_sql(response.text)

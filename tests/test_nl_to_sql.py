@@ -47,8 +47,10 @@ def test_build_prompt_includes_retrieved_context():
 
     prompt = build_prompt("List active users", context)
 
-    assert "Relevant retrieved context:" in prompt
-    assert "[schema: users]" in prompt
+    assert "Relevant schema:" in prompt
+    assert "[users]" in prompt
+    assert "Relevant business rules:" in prompt
+    assert "Relevant SQL examples:" in prompt
     assert "Active users have deleted_at IS NULL." in prompt
     assert "Question: List active users." in prompt
 

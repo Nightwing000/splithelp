@@ -1,6 +1,6 @@
 import pytest
 
-from retrieval import retrieve
+from retrieval import retrieve, retrieve_context
 
 
 def test_retrieve_returns_payment_context_for_paid_question():
@@ -64,3 +64,31 @@ def test_retrieve_respects_top_k_and_preserves_tie_order():
 def test_retrieve_rejects_negative_top_k():
     with pytest.raises(ValueError, match="top_k"):
         retrieve("users", top_k=-1)
+
+
+def test_retrieve_can_filter_by_kind():
+    result = retrieve("How much did each payer pay?", kind="example")
+
+    assert result
+    assert all(item["kind"] == "example" for item in result)
+
+
+def test_retrieve_context_preserves_each_kind_budget():
+    result = retrieve_context(
+        "Who owes money in the group?",
+        schema_limit=1,
+        rule_limit=2,
+        example_limit=1,
+    )
+
+    counts = {
+        kind: sum(item["kind"] == kind for item in result)
+        for kind in ("schema", "rule", "example")
+    }
+
+    assert counts == {"schema": 1, "rule": 2, "example": 1}
+
+
+def test_retrieve_context_rejects_negative_limits():
+    with pytest.raises(ValueError, match="limits"):
+        retrieve_context("users", schema_limit=-1)
