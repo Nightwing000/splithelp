@@ -126,6 +126,7 @@ def test_generate_sql_returns_clean_sql(monkeypatch):
     def load_dotenv(*, dotenv_path):
         assert dotenv_path == ENV_PATH
 
+    fake_dotenv.load_dotenv = load_dotenv
     monkeypatch.setitem(sys.modules, "google", fake_google)
     monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
