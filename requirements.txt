@@ -1,5 +1,5 @@
 # Runtime dependencies
-google-generativeai
+google-genai
 python-dotenv
 psycopg[binary]
 

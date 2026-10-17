@@ -2,7 +2,8 @@ from pathlib import Path
 import sys
 import types
 
-from nl_to_sql import SCHEMA_PATH, _extract_sql, ask, build_prompt
+from nl_to_sql import ENV_PATH, SCHEMA_PATH, _extract_sql, ask, build_prompt
+from retrieval import retrieve_context
 
 
 def test_build_prompt_includes_schema_and_question():
@@ -20,6 +21,13 @@ def test_build_prompt_does_not_depend_on_current_working_directory(monkeypatch, 
     prompt = build_prompt("List all active users")
 
     assert "List all active users" in prompt
+    assert "CREATE TABLE Users" in prompt
+
+
+def test_build_prompt_falls_back_to_full_schema_for_empty_context():
+    prompt = build_prompt("An unfamiliar question", [])
+
+    assert "Schema:" in prompt
     assert "CREATE TABLE Users" in prompt
 
 
@@ -51,8 +59,26 @@ def test_build_prompt_includes_retrieved_context():
     assert "[users]" in prompt
     assert "Relevant business rules:" in prompt
     assert "Relevant SQL examples:" in prompt
+    assert "exactly one read-only PostgreSQL statement" in prompt
+    assert "CANNOT_ANSWER" in prompt
+    assert "Treat literal values in examples as placeholders" in prompt
     assert "Active users have deleted_at IS NULL." in prompt
     assert "Question: List active users." in prompt
+
+
+def test_retrieved_prompt_respects_per_kind_budgets():
+    context = retrieve_context(
+        "Who owes money in group 1?",
+        schema_limit=1,
+        rule_limit=2,
+        example_limit=1,
+    )
+    prompt = build_prompt("Who owes money in group 1?", context)
+
+    assert sum(item["kind"] == "rule" for item in context) == 2
+    assert sum(item["kind"] == "schema" for item in context) == 1
+    assert sum(item["kind"] == "example" for item in context) == 1
+    assert all(prompt.count(f"[{item['id']}]") == 1 for item in context)
 
 
 def test_extract_sql_removes_sql_code_fence():
@@ -78,26 +104,30 @@ def test_generate_sql_returns_clean_sql(monkeypatch):
             assert "Show me the users" in prompt
             return FakeResponse()
 
-    fake_genai = types.ModuleType("google.generativeai")
+    fake_genai = types.ModuleType("google.genai")
 
-    def configure(api_key):
-        assert api_key == "fake-test-key"
+    class FakeModels:
+        def generate_content(self, *, model, contents):
+            assert model == "gemini-flash-latest"
+            return FakeModel().generate_content(contents)
 
-    def generative_model(model_name):
-        assert model_name == "gemini-flash-latest"
-        return FakeModel()
+    class FakeClient:
+        def __init__(self, *, api_key):
+            assert api_key == "fake-test-key"
+            self.models = FakeModels()
 
-    fake_genai.configure = configure
-    fake_genai.GenerativeModel = generative_model
+    fake_genai.Client = FakeClient
 
     fake_google = types.ModuleType("google")
-    fake_google.generativeai = fake_genai
+    fake_google.genai = fake_genai
 
     fake_dotenv = types.ModuleType("dotenv")
-    fake_dotenv.load_dotenv = lambda: None
+
+    def load_dotenv(*, dotenv_path):
+        assert dotenv_path == ENV_PATH
 
     monkeypatch.setitem(sys.modules, "google", fake_google)
-    monkeypatch.setitem(sys.modules, "google.generativeai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
     monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
 

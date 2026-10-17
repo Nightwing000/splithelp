@@ -9,6 +9,13 @@ from knowledge_base import KnowledgeItem
 from retrieval import retrieve_context
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+PROMPT_INSTRUCTIONS = """You are a PostgreSQL expert generating SQL for an expense-splitting application.
+Return exactly one read-only PostgreSQL statement and nothing else.
+Use only tables, columns, and relationships present in the supplied context.
+Do not invent schema elements.
+Treat literal values in examples as placeholders and use values from the user's question.
+If the question cannot be answered from the supplied context, return exactly CANNOT_ANSWER."""
 
 
 def _load_schema() -> str:
@@ -38,15 +45,14 @@ def build_prompt(
     question: str,
     context: Sequence[KnowledgeItem] | None = None,
 ) -> str:
-    if context is None:
+    if not context:
         context_text = _load_schema()
         context_heading = "Schema"
     else:
         context_text = _format_retrieved_context(context)
         context_heading = "Relevant retrieved context"
 
-    return f"""You are a PostgreSQL expert. Given the database context below, write a single SQL query that answers the user's question.
-Return ONLY the SQL query. No explanation, no markdown code fences.
+    return f"""{PROMPT_INSTRUCTIONS}
 
 {context_heading}:
 {context_text}
@@ -64,15 +70,17 @@ def _extract_sql(text: str) -> str:
 
 
 def generate_sql(question: str) -> str:
-    import google.generativeai as genai
+    from google import genai
     from dotenv import load_dotenv
 
-    load_dotenv()
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel("gemini-flash-latest")
+    load_dotenv(dotenv_path=ENV_PATH)
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     context = retrieve_context(question)
-    prompt = build_prompt(question, context) if context else build_prompt(question)
-    response = model.generate_content(prompt)
+    prompt = build_prompt(question, context)
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=prompt,
+    )
     return _extract_sql(response.text)
 
 

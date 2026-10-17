@@ -1,14 +1,17 @@
 import pytest
 
-from retrieval import retrieve, retrieve_context
+from retrieval import retrieve, retrieve_context, retrieve_scored
 
 
 def test_retrieve_returns_payment_context_for_paid_question():
-    result = retrieve("How much did each payer pay in a group?", top_k=5)
+    result = retrieve("How much did each payer pay in a group?", top_k=10)
     result_ids = [item["id"] for item in result]
 
     assert "expense_payments" in result_ids
     assert "group_payment_totals" in result_ids
+    assert result_ids.index("group_payment_totals") < result_ids.index(
+        "net_balance_calculation"
+    )
 
 
 def test_retrieve_returns_member_example_for_membership_question():
@@ -71,6 +74,17 @@ def test_retrieve_can_filter_by_kind():
 
     assert result
     assert all(item["kind"] == "example" for item in result)
+
+
+def test_retrieve_scored_exposes_score_and_matched_keywords():
+    result = retrieve_scored("How much did each payer pay?")
+
+    payment_match = next(
+        match for match in result if match.item["id"] == "expense_payments"
+    )
+
+    assert payment_match.score > 0
+    assert "pay" in payment_match.matched_keywords
 
 
 def test_retrieve_context_preserves_each_kind_budget():

@@ -61,7 +61,7 @@ KNOWLEDGE_ITEMS = [
         ),
         "keywords": [
             "group", "groups", "created", "creator",
-            "owner", "sharing", "community",
+            "owner", "sharing", "community", "member",
         ],
     },
     {
@@ -79,7 +79,7 @@ KNOWLEDGE_ITEMS = [
         ),
         "keywords": [
             "member", "members", "membership", "belongs",
-            "join", "joined", "participant",
+            "join", "joined", "participant", "group",
         ],
     },
     {
@@ -96,7 +96,7 @@ KNOWLEDGE_ITEMS = [
         ),
         "keywords": [
             "expense", "expenses", "cost", "purchase",
-            "description", "group", "spending",
+            "description", "group", "spending", "payment", "paid",
         ],
     },
     {
@@ -116,7 +116,7 @@ KNOWLEDGE_ITEMS = [
         ),
         "keywords": [
             "split", "splits", "owes", "owed", "debt",
-            "equal", "exact", "shares", "amount owed",
+            "equal", "exact", "shares", "amount owed", "group",
         ],
     },
 ]
@@ -177,7 +177,7 @@ BUSINESS_RULES = [
         ),
         "keywords": [
             "group balance", "group debts", "settlement",
-            "group_id", "group expenses", "who owes whom",
+            "group_id", "group expenses", "who owes whom", "owes",
         ],
     },
     {
@@ -326,8 +326,9 @@ SQL_EXAMPLES = [
             "ORDER BY net_balance DESC;"
         ),
         "keywords": [
-            "balance", "balances", "owes", "owed",
-            "settlement", "group", "net",
+            "balance", "balances", "owes", "owed", "owe",
+            "payment", "payments", "split", "splits",
+            "settlement", "group", "net", "paid", "total",
         ],
     },
 ]
