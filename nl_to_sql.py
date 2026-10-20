@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from knowledge_base import KnowledgeItem
 from retrieval import retrieve_context
+from sql_validation import validate_read_only_sql
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
 ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -85,7 +86,7 @@ def generate_sql(question: str) -> str:
 
 
 def ask(pool, question: str) -> list[dict] | None:
-    sql = generate_sql(question)
+    sql = validate_read_only_sql(generate_sql(question))
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql)

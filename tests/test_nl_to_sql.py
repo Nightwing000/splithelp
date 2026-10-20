@@ -2,8 +2,11 @@ from pathlib import Path
 import sys
 import types
 
+import pytest
+
 from nl_to_sql import ENV_PATH, SCHEMA_PATH, _extract_sql, ask, build_prompt
 from retrieval import retrieve_context
+from sql_validation import SQLValidationError
 
 
 def test_build_prompt_includes_schema_and_question():
@@ -145,7 +148,7 @@ def test_ask_returns_rows_as_dictionaries(monkeypatch):
         description = [("id",), ("name",)]
 
         def execute(self, sql):
-            assert sql == "SELECT id, name FROM Users;"
+            assert sql == "SELECT id, name FROM Users"
 
         def fetchall(self):
             return [(1, "Ishan"), (2, "Alex")]
@@ -189,12 +192,12 @@ def test_ask_returns_rows_as_dictionaries(monkeypatch):
     ]
 
 
-def test_ask_returns_none_for_statement_without_result_rows(monkeypatch):
+def test_ask_rejects_write_statement_before_database_execution(monkeypatch):
     class FakeCursor:
         description = None
 
         def execute(self, _sql):
-            pass
+            raise AssertionError("invalid SQL must not reach the database")
 
         def __enter__(self):
             return self
@@ -221,4 +224,19 @@ def test_ask_returns_none_for_statement_without_result_rows(monkeypatch):
         lambda _question: "CREATE TABLE temporary_table (id integer);",
     )
 
-    assert ask(FakePool(), "Create something") is None
+    with pytest.raises(SQLValidationError, match="Only SELECT"):
+        ask(FakePool(), "Create something")
+
+
+def test_ask_rejects_cannot_answer_before_database_execution(monkeypatch):
+    class FakePool:
+        def connection(self):
+            raise AssertionError("database must not be opened")
+
+    monkeypatch.setattr(
+        "nl_to_sql.generate_sql",
+        lambda _question: "CANNOT_ANSWER",
+    )
+
+    with pytest.raises(SQLValidationError, match="could not answer"):
+        ask(FakePool(), "Ask something unsupported")

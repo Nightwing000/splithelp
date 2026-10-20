@@ -2,6 +2,7 @@
 google-genai
 python-dotenv
 psycopg[binary]
+sqlglot
 
 # Test dependencies
 pytest
