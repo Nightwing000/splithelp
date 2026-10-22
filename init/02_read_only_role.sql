@@ -1,0 +1,35 @@
+-- Phase 6 database defense-in-depth template.
+-- Configure the password through deployment secrets before enabling this file.
+--
+-- PostgreSQL folds the unquoted table names in 01_schema.sql to lowercase.
+-- Keep the identifiers below unquoted for that reason.
+--
+-- CREATE ROLE splitter_readonly LOGIN PASSWORD '<read from deployment secret>';
+--
+-- REVOKE ALL ON DATABASE expense_splitter FROM splitter_readonly;
+-- GRANT CONNECT ON DATABASE expense_splitter TO splitter_readonly;
+--
+-- REVOKE ALL ON SCHEMA public FROM splitter_readonly;
+-- GRANT USAGE ON SCHEMA public TO splitter_readonly;
+--
+-- REVOKE ALL ON ALL TABLES IN SCHEMA public FROM splitter_readonly;
+-- GRANT SELECT ON TABLE
+--     public.users,
+--     public.groups,
+--     public.groupmembers,
+--     public.expenses,
+--     public.expensepayments,
+--     public.expensesplits
+-- TO splitter_readonly;
+--
+-- REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM splitter_readonly;
+-- REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM splitter_readonly;
+--
+-- ALTER DEFAULT PRIVILEGES FOR ROLE splitter_user IN SCHEMA public
+--     REVOKE ALL ON TABLES FROM splitter_readonly;
+-- ALTER DEFAULT PRIVILEGES FOR ROLE splitter_user IN SCHEMA public
+--     REVOKE ALL ON SEQUENCES FROM splitter_readonly;
+-- ALTER DEFAULT PRIVILEGES FOR ROLE splitter_user IN SCHEMA public
+--     REVOKE ALL ON FUNCTIONS FROM splitter_readonly;
+-- ALTER DEFAULT PRIVILEGES FOR ROLE splitter_user IN SCHEMA public
+--     GRANT SELECT ON TABLES TO splitter_readonly;

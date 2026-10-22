@@ -5,12 +5,16 @@ import re
 from pathlib import Path
 from collections.abc import Sequence
 
+from psycopg_pool import ConnectionPool
+
 from knowledge_base import KnowledgeItem
 from retrieval import retrieve_context
 from sql_validation import validate_read_only_sql
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
 ENV_PATH = Path(__file__).resolve().parent / ".env"
+READ_ONLY_DB_USER = "splitter_readonly"
+DATABASE_NAME = "expense_splitter"
 PROMPT_INSTRUCTIONS = """You are a PostgreSQL expert generating SQL for an expense-splitting application.
 Return exactly one read-only PostgreSQL statement and nothing else.
 Use only tables, columns, and relationships present in the supplied context.
@@ -83,6 +87,25 @@ def generate_sql(question: str) -> str:
         contents=prompt,
     )
     return _extract_sql(response.text)
+
+
+def get_read_only_pool() -> ConnectionPool:
+    """Build the pool `ask()` should actually be called with.
+
+    Connects as splitter_readonly, never the write-capable repository role --
+    repository writes must keep using their own separately injected pool.
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=ENV_PATH)
+    host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    password = os.environ["POSTGRES_READONLY_PASSWORD"]
+    conninfo = (
+        f"host={host} port={port} dbname={DATABASE_NAME} "
+        f"user={READ_ONLY_DB_USER} password={password}"
+    )
+    return ConnectionPool(conninfo, open=True)
 
 
 def ask(pool, question: str) -> list[dict] | None:

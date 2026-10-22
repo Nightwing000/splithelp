@@ -18,6 +18,20 @@ ALLOWED_TABLES = {
     "expensepayments",
     "expensesplits",
 }
+
+# Phase 6 follow-up: replace this schema-level placeholder with the exact
+# columns allowed for each table, then validate every exp.Column node.
+ALLOWED_COLUMNS = {
+    "users": set(),
+    "groups": set(),
+    "groupmembers": set(),
+    "expenses": set(),
+    "expensepayments": set(),
+    "expensesplits": set(),
+}
+
+# Phase 6 follow-up: replace this blocklist with an explicit allowlist of
+# aggregate, conditional, and date functions used by supported questions.
 BLOCKED_FUNCTIONS = {
     "pg_read_file",
     "pg_read_binary_file",
@@ -26,6 +40,12 @@ BLOCKED_FUNCTIONS = {
     "lo_export",
     "dblink",
 }
+ALLOWED_FUNCTIONS = set()
+
+# Phase 6 follow-up: use these names when creating a restricted PostgreSQL
+# role for NL-to-SQL connections. Do not reuse the write-capable app role.
+READ_ONLY_ROLE_NAME = "splitter_readonly"
+READ_ONLY_ROLE_PASSWORD = "<set outside source control>"
 
 
 def validate_read_only_sql(sql: str) -> str:
