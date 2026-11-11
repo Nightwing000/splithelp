@@ -15,6 +15,10 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
 ENV_PATH = Path(__file__).resolve().parent / ".env"
 READ_ONLY_DB_USER = "splitter_readonly"
 DATABASE_NAME = "expense_splitter"
+PRIMARY_MODEL = "gemini-flash-latest"
+# Separate free-tier quota bucket (500 RPD vs 20 RPD on the primary).
+FALLBACK_MODEL = "gemini-flash-lite-latest"
+RATE_LIMITED = 429
 PROMPT_INSTRUCTIONS = """You are a PostgreSQL expert generating SQL for an expense-splitting application.
 Return exactly one read-only PostgreSQL statement and nothing else.
 Use only tables, columns, and relationships present in the supplied context.
@@ -76,16 +80,26 @@ def _extract_sql(text: str) -> str:
 
 def generate_sql(question: str) -> str:
     from google import genai
+    from google.genai import errors
     from dotenv import load_dotenv
 
     load_dotenv(dotenv_path=ENV_PATH)
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     context = retrieve_context(question)
     prompt = build_prompt(question, context)
-    response = client.models.generate_content(
-        model="gemini-flash-latest",
-        contents=prompt,
-    )
+    try:
+        response = client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=prompt,
+        )
+    except errors.ClientError as exc:
+        if exc.code != RATE_LIMITED:
+            raise
+        print(f"{PRIMARY_MODEL} rate-limited; retrying with {FALLBACK_MODEL}")
+        response = client.models.generate_content(
+            model=FALLBACK_MODEL,
+            contents=prompt,
+        )
     return _extract_sql(response.text)
 
 

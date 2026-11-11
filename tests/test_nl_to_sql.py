@@ -96,30 +96,30 @@ def test_extract_sql_strips_surrounding_whitespace_without_code_fence():
     assert _extract_sql(text) == "SELECT id FROM Users;"
 
 
-def test_generate_sql_returns_clean_sql(monkeypatch):
-    """Test generate_sql without making a real Gemini API request."""
+class FakeClientError(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
 
-    class FakeResponse:
-        text = "```sql\nSELECT id, name FROM Users;\n```"
 
-    class FakeModel:
-        def generate_content(self, prompt):
-            assert "Show me the users" in prompt
-            return FakeResponse()
-
-    fake_genai = types.ModuleType("google.genai")
+def _install_fake_genai(monkeypatch, generate_content):
+    """Stand in for google.genai so tests never spend Gemini quota."""
 
     class FakeModels:
         def generate_content(self, *, model, contents):
-            assert model == "gemini-flash-latest"
-            return FakeModel().generate_content(contents)
+            return generate_content(model, contents)
 
     class FakeClient:
         def __init__(self, *, api_key):
             assert api_key == "fake-test-key"
             self.models = FakeModels()
 
+    fake_errors = types.ModuleType("google.genai.errors")
+    fake_errors.ClientError = FakeClientError
+
+    fake_genai = types.ModuleType("google.genai")
     fake_genai.Client = FakeClient
+    fake_genai.errors = fake_errors
 
     fake_google = types.ModuleType("google")
     fake_google.genai = fake_genai
@@ -132,15 +132,60 @@ def test_generate_sql_returns_clean_sql(monkeypatch):
     fake_dotenv.load_dotenv = load_dotenv
     monkeypatch.setitem(sys.modules, "google", fake_google)
     monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.errors", fake_errors)
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
     monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
 
+
+class FakeResponse:
+    def __init__(self, text):
+        self.text = text
+
+
+def test_generate_sql_returns_clean_sql(monkeypatch):
+    def generate_content(model, contents):
+        assert model == "gemini-flash-latest"
+        assert "Show me the users" in contents
+        return FakeResponse("```sql\nSELECT id, name FROM Users;\n```")
+
+    _install_fake_genai(monkeypatch, generate_content)
     from nl_to_sql import generate_sql
 
     result = generate_sql("Show me the users")
 
     assert result == "SELECT id, name FROM Users;"
     assert "```" not in result
+
+
+def test_generate_sql_falls_back_when_primary_is_rate_limited(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        if model == "gemini-flash-latest":
+            raise FakeClientError(429)
+        return FakeResponse("SELECT id FROM Users;")
+
+    _install_fake_genai(monkeypatch, generate_content)
+    from nl_to_sql import generate_sql
+
+    assert generate_sql("Show me the users") == "SELECT id FROM Users;"
+    assert calls == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+
+
+def test_generate_sql_does_not_retry_other_client_errors(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        raise FakeClientError(403)
+
+    _install_fake_genai(monkeypatch, generate_content)
+    from nl_to_sql import generate_sql
+
+    with pytest.raises(FakeClientError):
+        generate_sql("Show me the users")
+    assert calls == ["gemini-flash-latest"]
 
 
 def test_ask_returns_rows_as_dictionaries(monkeypatch):
