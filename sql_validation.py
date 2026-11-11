@@ -4,6 +4,8 @@ import re
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.errors import OptimizeError
+from sqlglot.optimizer.qualify import qualify
 
 
 class SQLValidationError(ValueError):
@@ -19,28 +21,49 @@ ALLOWED_TABLES = {
     "expensesplits",
 }
 
-# Phase 6 follow-up: replace this schema-level placeholder with the exact
-# columns allowed for each table, then validate every exp.Column node.
+# Mirrors init/01_schema.sql. Keys are lowercase because Postgres folds
+# unquoted identifiers to lowercase.
 ALLOWED_COLUMNS = {
-    "users": set(),
-    "groups": set(),
-    "groupmembers": set(),
-    "expenses": set(),
-    "expensepayments": set(),
-    "expensesplits": set(),
+    "users": {"id", "name", "email", "created_at", "deleted_at"},
+    "groups": {"id", "name", "created_by", "created_at"},
+    "groupmembers": {"group_id", "user_id", "joined_at"},
+    "expenses": {"id", "group_id", "description", "created_at"},
+    "expensepayments": {"id", "expense_id", "user_id", "amount"},
+    "expensesplits": {
+        "id",
+        "expense_id",
+        "user_id",
+        "split_type",
+        "amount_owed",
+    },
 }
 
-# Phase 6 follow-up: replace this blocklist with an explicit allowlist of
-# aggregate, conditional, and date functions used by supported questions.
-BLOCKED_FUNCTIONS = {
-    "pg_read_file",
-    "pg_read_binary_file",
-    "pg_ls_dir",
-    "lo_import",
-    "lo_export",
-    "dblink",
+# SQLGlot's canonical names, not Postgres spellings (DATE_TRUNC -> TIMESTAMP_TRUNC,
+# NOW() -> CURRENT_TIMESTAMP). CASE also emits an internal IF node.
+ALLOWED_FUNCTIONS = {
+    "COUNT",
+    "SUM",
+    "AVG",
+    "MIN",
+    "MAX",
+    "COALESCE",
+    "ROUND",
+    "CASE",
+    "IF",
+    "EXISTS",
+    "CAST",
+    "LOWER",
+    "UPPER",
+    "TIMESTAMP_TRUNC",
+    "EXTRACT",
+    "CURRENT_DATE",
+    "CURRENT_TIMESTAMP",
 }
-ALLOWED_FUNCTIONS = set()
+QUALIFY_SCHEMA = {
+    table: dict.fromkeys(columns, "TEXT")
+    for table, columns in ALLOWED_COLUMNS.items()
+}
+
 
 # Phase 6 follow-up: use these names when creating a restricted PostgreSQL
 # role for NL-to-SQL connections. Do not reuse the write-capable app role.
@@ -137,13 +160,33 @@ def validate_read_only_sql(sql: str) -> str:
                     f"Table '{node.name}' is not approved."
                 )
 
-        # Block explicitly dangerous function calls.
-        if isinstance(node, exp.Anonymous):
-            function_name = node.name.lower()
+        # Check if the function is in the allowed list.
+        if isinstance(node, exp.Func):
+            # AND/OR/XOR are operators, but SQLGlot models them as Func
+            # subclasses. Their children are still visited by walk().
+            if isinstance(node, exp.Connector):
+                continue
 
-            if function_name in BLOCKED_FUNCTIONS:
+            # Known functions are identified by class; unknown ones
+            # (e.g. pg_sleep) are Anonymous and carry their name in .name.
+            if isinstance(node, exp.Anonymous):
+                function_name = node.name.upper()
+            else:
+                function_name = node.sql_name()
+
+            if function_name not in ALLOWED_FUNCTIONS:
                 raise SQLValidationError(
-                    f"Function '{function_name}' is not allowed."
+                    f"Function '{function_name}' is not approved."
                 )
+
+    # Resolve every column against the real schema. qualify() rewrites the
+    # tree it is given (adding aliases like "_col_0"), so check a copy and
+    # return the original SQL.
+    try:
+        qualify(statement.copy(), schema=QUALIFY_SCHEMA, dialect="postgres")
+    except OptimizeError as exc:
+        raise SQLValidationError(
+            "Query references an unknown or ambiguous column."
+        ) from exc
 
     return statement.sql(dialect="postgres")
