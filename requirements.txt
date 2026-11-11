@@ -1,7 +1,7 @@
 # Runtime dependencies
 google-genai
 python-dotenv
-psycopg[binary]
+psycopg[binary,pool]
 sqlglot
 
 # Test dependencies
