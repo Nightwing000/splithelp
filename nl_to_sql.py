@@ -27,6 +27,10 @@ Treat literal values in examples as placeholders and use values from the user's 
 If the question cannot be answered from the supplied context, return exactly CANNOT_ANSWER."""
 
 
+class LLMUnavailableError(RuntimeError):
+    """Raised when the language model cannot produce a response."""
+
+
 def _load_schema() -> str:
     with SCHEMA_PATH.open("r", encoding="utf-8") as f:
         return f.read()
@@ -79,28 +83,40 @@ def _extract_sql(text: str) -> str:
 
 
 def generate_sql(question: str) -> str:
+    context = retrieve_context(question)
+    prompt = build_prompt(question, context)
+    return _extract_sql(generate_text(prompt))
+
+
+def generate_text(prompt: str) -> str:
+    """Send one prompt to Gemini, falling back to the lite model on a 429.
+
+    Any Gemini API failure is re-raised as LLMUnavailableError so callers
+    never depend on provider-specific exception types.
+    """
     from google import genai
     from google.genai import errors
     from dotenv import load_dotenv
 
     load_dotenv(dotenv_path=ENV_PATH)
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    context = retrieve_context(question)
-    prompt = build_prompt(question, context)
     try:
-        response = client.models.generate_content(
-            model=PRIMARY_MODEL,
-            contents=prompt,
-        )
-    except errors.ClientError as exc:
-        if exc.code != RATE_LIMITED:
-            raise
-        print(f"{PRIMARY_MODEL} rate-limited; retrying with {FALLBACK_MODEL}")
-        response = client.models.generate_content(
-            model=FALLBACK_MODEL,
-            contents=prompt,
-        )
-    return _extract_sql(response.text)
+        try:
+            response = client.models.generate_content(
+                model=PRIMARY_MODEL,
+                contents=prompt,
+            )
+        except errors.ClientError as exc:
+            if exc.code != RATE_LIMITED:
+                raise
+            print(f"{PRIMARY_MODEL} rate-limited; retrying with {FALLBACK_MODEL}")
+            response = client.models.generate_content(
+                model=FALLBACK_MODEL,
+                contents=prompt,
+            )
+    except errors.APIError as exc:
+        raise LLMUnavailableError(f"Gemini request failed: {exc}") from exc
+    return response.text
 
 
 def get_read_only_pool() -> ConnectionPool:

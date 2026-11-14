@@ -21,6 +21,10 @@ TABLES = (
     "expensepayments",
     "expensesplits",
 )
+# pg_sleep and other pg_catalog built-ins stay executable by every role, so
+# the validator is not the only thing standing between a slow query and a
+# pinned connection.
+STATEMENT_TIMEOUT = "5s"
 
 
 def _required_environment(name: str) -> str:
@@ -96,6 +100,9 @@ def _configure_privileges(cur) -> None:
         sql.SQL(
             "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM {}"
         ).format(role),
+        sql.SQL("ALTER ROLE {} SET statement_timeout = {}").format(
+            role, sql.Literal(STATEMENT_TIMEOUT)
+        ),
     )
 
     for statement in statements:

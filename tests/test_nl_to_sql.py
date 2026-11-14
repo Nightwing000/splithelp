@@ -4,7 +4,14 @@ import types
 
 import pytest
 
-from nl_to_sql import ENV_PATH, SCHEMA_PATH, _extract_sql, ask, build_prompt
+from nl_to_sql import (
+    ENV_PATH,
+    SCHEMA_PATH,
+    LLMUnavailableError,
+    _extract_sql,
+    ask,
+    build_prompt,
+)
 from retrieval import retrieve_context
 from sql_validation import SQLValidationError
 
@@ -96,7 +103,11 @@ def test_extract_sql_strips_surrounding_whitespace_without_code_fence():
     assert _extract_sql(text) == "SELECT id FROM Users;"
 
 
-class FakeClientError(Exception):
+class FakeAPIError(Exception):
+    pass
+
+
+class FakeClientError(FakeAPIError):
     def __init__(self, code):
         super().__init__(code)
         self.code = code
@@ -115,6 +126,7 @@ def _install_fake_genai(monkeypatch, generate_content):
             self.models = FakeModels()
 
     fake_errors = types.ModuleType("google.genai.errors")
+    fake_errors.APIError = FakeAPIError
     fake_errors.ClientError = FakeClientError
 
     fake_genai = types.ModuleType("google.genai")
@@ -183,9 +195,25 @@ def test_generate_sql_does_not_retry_other_client_errors(monkeypatch):
     _install_fake_genai(monkeypatch, generate_content)
     from nl_to_sql import generate_sql
 
-    with pytest.raises(FakeClientError):
+    with pytest.raises(LLMUnavailableError) as exc_info:
         generate_sql("Show me the users")
     assert calls == ["gemini-flash-latest"]
+    assert isinstance(exc_info.value.__cause__, FakeClientError)
+
+
+def test_generate_sql_raises_when_fallback_is_also_rate_limited(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        raise FakeClientError(429)
+
+    _install_fake_genai(monkeypatch, generate_content)
+    from nl_to_sql import generate_sql
+
+    with pytest.raises(LLMUnavailableError):
+        generate_sql("Show me the users")
+    assert calls == ["gemini-flash-latest", "gemini-flash-lite-latest"]
 
 
 def test_ask_returns_rows_as_dictionaries(monkeypatch):

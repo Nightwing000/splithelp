@@ -12,6 +12,10 @@ class SQLValidationError(ValueError):
     """Raised when generated SQL violates the read-only query policy."""
 
 
+class CannotAnswerError(SQLValidationError):
+    """Raised when the model cannot answer a question with the available data."""
+
+
 ALLOWED_TABLES = {
     "users",
     "groups",
@@ -70,6 +74,8 @@ QUALIFY_SCHEMA = {
 READ_ONLY_ROLE_NAME = "splitter_readonly"
 READ_ONLY_ROLE_PASSWORD = "<set outside source control>"
 
+CANNOT_ANSWER = "CANNOT_ANSWER"
+
 
 def validate_read_only_sql(sql: str) -> str:
     """Validate and return one safe, read-only PostgreSQL statement.
@@ -87,8 +93,8 @@ def validate_read_only_sql(sql: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
 
-    if normalized_sql.upper().rstrip(";").strip() == "CANNOT_ANSWER":
-        raise SQLValidationError(
+    if normalized_sql.upper().rstrip(";").strip() == CANNOT_ANSWER:
+        raise CannotAnswerError(
             "The model could not answer this question using the available data."
         )
 
