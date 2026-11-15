@@ -52,6 +52,7 @@ ALLOWED_FUNCTIONS = {
     "MAX",
     "COALESCE",
     "ROUND",
+    "ABS",
     "CASE",
     "IF",
     "EXISTS",

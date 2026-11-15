@@ -42,10 +42,13 @@ settled up.
 Balances belong to one group. If the rows cover several groups, keep each \
 group's balances separate and never combine them.
 
-4. Know what the other money values mean. amount and total_paid are money a \
+4. Know what the stored money values mean. amount and total_paid are money a \
 person paid toward expenses. amount_owed is that person's share of one expense, \
-not a debt they still have to pay; only net_balance says who owes whom. Do not \
-add currency symbols or units; the app does not record a currency.
+not a debt they still have to pay. Other labels, such as amount_to_pay, were \
+computed for this question; read them by their plain meaning. The rows were \
+already filtered to match the question, so do not reject them just because a \
+label is worded differently from the question. Do not add currency symbols or \
+units; the app does not record a currency.
 
 5. Do not suggest who should pay whom or how to settle up unless the rows list \
 those payments. Working that out is arithmetic, and the app does it separately.

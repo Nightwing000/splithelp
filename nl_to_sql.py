@@ -18,12 +18,21 @@ DATABASE_NAME = "expense_splitter"
 PRIMARY_MODEL = "gemini-flash-latest"
 # Separate free-tier quota bucket (500 RPD vs 20 RPD on the primary).
 FALLBACK_MODEL = "gemini-flash-lite-latest"
-RATE_LIMITED = 429
+# 429: primary quota used up. 503: primary overloaded ("high demand").
+# 504: our REQUEST_TIMEOUT_MS is sent to the server as a deadline, and an
+# overloaded model reports missing it this way. All are temporary and
+# specific to the primary model, so the fallback can still succeed. Other
+# errors (bad key, bad request) would fail there too.
+FALLBACK_STATUS_CODES = {429, 503, 504}
+# The SDK has no timeout by default; an overloaded model once held a single
+# request for over 3 minutes. Worst case with the fallback is 2x this.
+REQUEST_TIMEOUT_MS = 20_000
 PROMPT_INSTRUCTIONS = """You are a PostgreSQL expert generating SQL for an expense-splitting application.
 Return exactly one read-only PostgreSQL statement and nothing else.
 Use only tables, columns, and relationships present in the supplied context.
 Do not invent schema elements.
 Treat literal values in examples as placeholders and use values from the user's question.
+Never alias a computed value with the name of an existing schema column; for example, name ABS(net_balance) amount_to_pay, not amount_owed.
 If the question cannot be answered from the supplied context, return exactly CANNOT_ANSWER."""
 
 
@@ -89,33 +98,40 @@ def generate_sql(question: str) -> str:
 
 
 def generate_text(prompt: str) -> str:
-    """Send one prompt to Gemini, falling back to the lite model on a 429.
+    """Send one prompt to Gemini, falling back to the lite model on a 429,
+    503, or timeout.
 
-    Any Gemini API failure is re-raised as LLMUnavailableError so callers
-    never depend on provider-specific exception types.
+    Any Gemini API or network failure is re-raised as LLMUnavailableError so
+    callers never depend on provider-specific exception types.
     """
+    import httpx
     from google import genai
     from google.genai import errors
     from dotenv import load_dotenv
 
     load_dotenv(dotenv_path=ENV_PATH)
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options={"timeout": REQUEST_TIMEOUT_MS},
+    )
     try:
         try:
             response = client.models.generate_content(
                 model=PRIMARY_MODEL,
                 contents=prompt,
             )
-        except errors.ClientError as exc:
-            if exc.code != RATE_LIMITED:
+        except (errors.APIError, httpx.TimeoutException) as exc:
+            # Timeouts are not APIErrors: the SDK raises httpx's own exception.
+            if isinstance(exc, errors.APIError) and exc.code not in FALLBACK_STATUS_CODES:
                 raise
-            print(f"{PRIMARY_MODEL} rate-limited; retrying with {FALLBACK_MODEL}")
+            print(f"{PRIMARY_MODEL} failed ({type(exc).__name__}); retrying with {FALLBACK_MODEL}")
             response = client.models.generate_content(
                 model=FALLBACK_MODEL,
                 contents=prompt,
             )
-    except errors.APIError as exc:
-        raise LLMUnavailableError(f"Gemini request failed: {exc}") from exc
+    # TransportError covers timeouts and connection failures (e.g. offline).
+    except (errors.APIError, httpx.TransportError) as exc:
+        raise LLMUnavailableError(f"Gemini request failed: {exc!r}") from exc
     return response.text
 
 

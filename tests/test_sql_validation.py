@@ -142,6 +142,7 @@ def test_trusted_examples_pass_validation(example):
         "(SELECT 1 FROM GroupMembers gm WHERE gm.user_id = Users.id);",
         "SELECT amount::numeric FROM ExpensePayments;",
         "SELECT LOWER(name) FROM Users;",
+        "SELECT ABS(amount_owed) FROM ExpenseSplits;",
         "SELECT DATE_TRUNC('month', created_at) FROM Expenses;",
         "SELECT EXTRACT(MONTH FROM created_at) FROM Expenses;",
         "SELECT id FROM Expenses WHERE created_at > NOW() - INTERVAL '7 days';",

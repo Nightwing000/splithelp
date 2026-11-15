@@ -2,12 +2,14 @@ from pathlib import Path
 import sys
 import types
 
+import httpx
 import pytest
 
 from nl_to_sql import (
     ENV_PATH,
     SCHEMA_PATH,
     LLMUnavailableError,
+    REQUEST_TIMEOUT_MS,
     _extract_sql,
     ask,
     build_prompt,
@@ -72,6 +74,9 @@ def test_build_prompt_includes_retrieved_context():
     assert "exactly one read-only PostgreSQL statement" in prompt
     assert "CANNOT_ANSWER" in prompt
     assert "Treat literal values in examples as placeholders" in prompt
+    # The phrasing prompt reads amount_owed as a per-expense share, so a
+    # computed debt aliased amount_owed was once answered as "nothing found".
+    assert "Never alias a computed value with the name of an existing schema column" in prompt
     assert "Active users have deleted_at IS NULL." in prompt
     assert "Question: List active users." in prompt
 
@@ -104,13 +109,17 @@ def test_extract_sql_strips_surrounding_whitespace_without_code_fence():
 
 
 class FakeAPIError(Exception):
-    pass
-
-
-class FakeClientError(FakeAPIError):
     def __init__(self, code):
         super().__init__(code)
         self.code = code
+
+
+class FakeClientError(FakeAPIError):
+    pass
+
+
+class FakeServerError(FakeAPIError):
+    pass
 
 
 def _install_fake_genai(monkeypatch, generate_content):
@@ -121,8 +130,9 @@ def _install_fake_genai(monkeypatch, generate_content):
             return generate_content(model, contents)
 
     class FakeClient:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, http_options):
             assert api_key == "fake-test-key"
+            assert http_options == {"timeout": REQUEST_TIMEOUT_MS}
             self.models = FakeModels()
 
     fake_errors = types.ModuleType("google.genai.errors")
@@ -183,6 +193,49 @@ def test_generate_sql_falls_back_when_primary_is_rate_limited(monkeypatch):
 
     assert generate_sql("Show me the users") == "SELECT id FROM Users;"
     assert calls == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+
+
+def test_generate_sql_falls_back_when_primary_is_overloaded(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        if model == "gemini-flash-latest":
+            raise FakeServerError(503)
+        return FakeResponse("SELECT id FROM Users;")
+
+    _install_fake_genai(monkeypatch, generate_content)
+    from nl_to_sql import generate_sql
+
+    assert generate_sql("Show me the users") == "SELECT id FROM Users;"
+    assert calls == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+
+
+def test_generate_sql_falls_back_when_primary_times_out(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        if model == "gemini-flash-latest":
+            raise httpx.ReadTimeout("timed out")
+        return FakeResponse("SELECT id FROM Users;")
+
+    _install_fake_genai(monkeypatch, generate_content)
+    from nl_to_sql import generate_sql
+
+    assert generate_sql("Show me the users") == "SELECT id FROM Users;"
+    assert calls == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+
+
+def test_generate_sql_raises_when_offline(monkeypatch):
+    def generate_content(model, contents):
+        raise httpx.ConnectError("no network")
+
+    _install_fake_genai(monkeypatch, generate_content)
+    from nl_to_sql import generate_sql
+
+    with pytest.raises(LLMUnavailableError):
+        generate_sql("Show me the users")
 
 
 def test_generate_sql_does_not_retry_other_client_errors(monkeypatch):
