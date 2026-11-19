@@ -106,3 +106,19 @@ def test_retrieve_context_preserves_each_kind_budget():
 def test_retrieve_context_rejects_negative_limits():
     with pytest.raises(ValueError, match="limits"):
         retrieve_context("users", schema_limit=-1)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How much do I owe in the Goa Trip group?",
+        "Who owes money in the Goa Trip group?",
+    ],
+)
+def test_balance_questions_get_every_table_a_balance_needs(question):
+    # Live test: with only 3 schema slots, Expenses/ExpensePayments/
+    # GroupMembers were dropped, and the prompt's "use only tables in the
+    # supplied context" rule made the model answer CANNOT_ANSWER.
+    ids = {item["id"] for item in retrieve_context(question)}
+
+    assert {"users", "expenses", "expense_payments", "expense_splits", "group_members"} <= ids

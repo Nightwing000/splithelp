@@ -78,6 +78,10 @@ def test_build_prompt_includes_retrieved_context():
     # The phrasing prompt reads amount_owed as a per-expense share, so a
     # computed debt aliased amount_owed was once answered as "nothing found".
     assert "Never alias a computed value with the name of an existing schema column" in prompt
+    # Live test: without these, the lite model answered CANNOT_ANSWER 9/9 times
+    # for owe/owed questions once all six tables were in the context.
+    assert "filter on Groups.name and Users.name" in prompt
+    assert "questions are about net balances" in prompt
     assert "Active users have deleted_at IS NULL." in prompt
     assert "Question: List active users." in prompt
 

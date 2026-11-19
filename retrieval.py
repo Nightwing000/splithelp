@@ -101,21 +101,32 @@ def retrieve(
 def retrieve_context(
     question: str,
     items: Sequence[KnowledgeItem] = ALL_KNOWLEDGE,
-    schema_limit: int = 3,
+    schema_limit: int | None = None,
     rule_limit: int = 4,
     example_limit: int = 2,
 ) -> list[KnowledgeItem]:
+    """Retrieve prompt context for a question.
+
+    schema_limit=None (the default) includes every schema item. The schema
+    is six tables, and a ranked cut kept dropping tables a balance query
+    needs (Expenses, ExpensePayments, GroupMembers), so the model answered
+    CANNOT_ANSWER under the "use only tables in the context" rule. Rules and
+    examples stay ranked and budgeted.
+    """
     limits = {
         "schema": schema_limit,
         "rule": rule_limit,
         "example": example_limit,
     }
-    if any(limit < 0 for limit in limits.values()):
+    if any(limit is not None and limit < 0 for limit in limits.values()):
         raise ValueError("context limits must be non-negative")
 
     context = []
     for kind, limit in limits.items():
-        context.extend(retrieve(question, items, top_k=limit, kind=kind))
+        if limit is None:
+            context.extend(item for item in items if item["kind"] == kind)
+        else:
+            context.extend(retrieve(question, items, top_k=limit, kind=kind))
     return context
 
 
