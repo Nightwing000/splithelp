@@ -10,7 +10,7 @@ import psycopg
 @dataclass
 class ExpensePayment:
     user_id: int
-    amount: float
+    amount: Decimal
     id: int | None = None
     expense_id: int | None = None
 
@@ -19,7 +19,7 @@ class ExpensePayment:
 class ExpenseSplit:
     user_id: int
     split_type: str
-    amount_owed: float
+    amount_owed: Decimal
     id: int | None = None
     expense_id: int | None = None
 

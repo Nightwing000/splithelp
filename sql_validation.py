@@ -42,6 +42,12 @@ ALLOWED_COLUMNS = {
     },
 }
 
+# Schema columns the NL-to-SQL path must never query (e.g. a future
+# password_hash). Every schema column must be in exactly one of
+# ALLOWED_COLUMNS or here; tests/test_schema_drift.py enforces it.
+EXCLUDED_COLUMNS: dict[str, set[str]] = {}
+
+
 # SQLGlot's canonical names, not Postgres spellings (DATE_TRUNC -> TIMESTAMP_TRUNC,
 # NOW() -> CURRENT_TIMESTAMP). CASE also emits an internal IF node.
 ALLOWED_FUNCTIONS = {
