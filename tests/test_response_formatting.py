@@ -2,14 +2,17 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import psycopg
+import psycopg_pool
 import pytest
 
 from nl_to_sql import LLMUnavailableError, QueryResult
 from response_formatting import (
     CANNOT_ANSWER_MESSAGE,
+    DATABASE_UNAVAILABLE_MESSAGE,
     LLM_UNAVAILABLE_MESSAGE,
     MAX_ROWS_FOR_LLM,
     NO_RESULTS_MESSAGE,
+    QUERY_FAILED_MESSAGE,
     REJECTED_QUERY_MESSAGE,
     TIMEOUT_MESSAGE,
     _describe_balance,
@@ -269,3 +272,37 @@ def test_answer_passes_sql_to_phrasing(monkeypatch):
     answer(object(), "Who owes money?")
 
     assert FAKE_SQL in prompts[0]
+
+
+# --- Phase 8 task 5: remaining database errors -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        # QueryCanceled and PoolTimeout are both OperationalError
+        # subclasses, so the timeout branch must be checked first.
+        (psycopg.errors.QueryCanceled("statement timeout"), TIMEOUT_MESSAGE),
+        (psycopg_pool.PoolTimeout("couldn't get a connection after 30.00 sec"), DATABASE_UNAVAILABLE_MESSAGE),
+        (psycopg.OperationalError("connection refused"), DATABASE_UNAVAILABLE_MESSAGE),
+        (psycopg.errors.UndefinedColumn("column does not exist"), QUERY_FAILED_MESSAGE),
+        (psycopg.errors.InsufficientPrivilege("permission denied"), QUERY_FAILED_MESSAGE),
+    ],
+)
+def test_answer_maps_database_errors(monkeypatch, error, expected):
+    _fake_ask(monkeypatch, error)
+
+    assert answer(object(), "Who owes money?") == expected
+
+
+def test_role_blocking_a_validated_query_is_logged_as_an_error(monkeypatch, caplog):
+    # The validator passed it but the read-only role refused it: the first
+    # line of defence missed something, so this must stand out in the logs.
+    _fake_ask(monkeypatch, psycopg.errors.InsufficientPrivilege("permission denied"))
+
+    answer(object(), "Who owes money?")
+
+    assert any(
+        record.levelname == "ERROR" and "read-only role" in record.getMessage()
+        for record in caplog.records
+    )

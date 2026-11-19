@@ -86,6 +86,12 @@ TIMEOUT_MESSAGE = (
 LLM_UNAVAILABLE_MESSAGE = (
     "I can't answer questions right now. Please try again in a few minutes."
 )
+DATABASE_UNAVAILABLE_MESSAGE = (
+    "The expense database is unavailable right now. Please try again shortly."
+)
+QUERY_FAILED_MESSAGE = (
+    "Something went wrong while looking that up. Please try rephrasing it."
+)
 CENTS = Decimal("0.01")
 # Positive means the user is owed money, negative means they owe it
 # (knowledge_base.py positive_balance / negative_balance rules).
@@ -233,9 +239,26 @@ def answer(pool, question: str) -> str:
     except SQLValidationError as exc:
         return format_error(exc)
     except psycopg.errors.QueryCanceled:
-        # Raised by the splitter_readonly role's statement_timeout.
+        # Raised by the splitter_readonly role's statement_timeout. It is an
+        # OperationalError subclass, so it must come before that branch.
         logger.warning("Query timed out for question: %s", question)
         return TIMEOUT_MESSAGE
+    except psycopg.OperationalError:
+        # Database down or unreachable; psycopg_pool.PoolTimeout lands here.
+        logger.exception("Database unavailable for question: %s", question)
+        return DATABASE_UNAVAILABLE_MESSAGE
+    except psycopg.errors.InsufficientPrivilege:
+        # The validator approved SQL that the read-only role then refused:
+        # the first layer of defence missed something.
+        logger.error(
+            "read-only role refused SQL the validator approved, for question: %s",
+            question,
+            exc_info=True,
+        )
+        return QUERY_FAILED_MESSAGE
+    except psycopg.Error:
+        logger.exception("Query failed for question: %s", question)
+        return QUERY_FAILED_MESSAGE
     except LLMUnavailableError:
         # No rows exist yet, so unlike phrasing there is nothing to fall back to.
         logger.exception("SQL generation failed for question: %s", question)
