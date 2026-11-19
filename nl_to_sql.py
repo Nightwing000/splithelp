@@ -16,6 +16,8 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "init" / "01_schema.sql"
 ENV_PATH = Path(__file__).resolve().parent / ".env"
 READ_ONLY_DB_USER = "splitter_readonly"
 DATABASE_NAME = "expense_splitter"
+# Defaults; GEMINI_PRIMARY_MODEL / GEMINI_FALLBACK_MODEL in .env override them
+# without a code change (the primary returned 503 on every live call once).
 PRIMARY_MODEL = "gemini-flash-latest"
 # Separate free-tier quota bucket (500 RPD vs 20 RPD on the primary).
 FALLBACK_MODEL = "gemini-flash-lite-latest"
@@ -111,6 +113,9 @@ def generate_text(prompt: str) -> str:
     from dotenv import load_dotenv
 
     load_dotenv(dotenv_path=ENV_PATH)
+    # "or": a blank "GEMINI_PRIMARY_MODEL=" line must not select model "".
+    primary_model = os.environ.get("GEMINI_PRIMARY_MODEL") or PRIMARY_MODEL
+    fallback_model = os.environ.get("GEMINI_FALLBACK_MODEL") or FALLBACK_MODEL
     client = genai.Client(
         api_key=os.environ["GEMINI_API_KEY"],
         http_options={"timeout": REQUEST_TIMEOUT_MS},
@@ -118,16 +123,16 @@ def generate_text(prompt: str) -> str:
     try:
         try:
             response = client.models.generate_content(
-                model=PRIMARY_MODEL,
+                model=primary_model,
                 contents=prompt,
             )
         except (errors.APIError, httpx.TimeoutException) as exc:
             # Timeouts are not APIErrors: the SDK raises httpx's own exception.
             if isinstance(exc, errors.APIError) and exc.code not in FALLBACK_STATUS_CODES:
                 raise
-            print(f"{PRIMARY_MODEL} failed ({type(exc).__name__}); retrying with {FALLBACK_MODEL}")
+            print(f"{primary_model} failed ({type(exc).__name__}); retrying with {fallback_model}")
             response = client.models.generate_content(
-                model=FALLBACK_MODEL,
+                model=fallback_model,
                 contents=prompt,
             )
     # TransportError covers timeouts and connection failures (e.g. offline).

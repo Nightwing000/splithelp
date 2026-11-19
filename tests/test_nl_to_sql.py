@@ -158,6 +158,10 @@ def _install_fake_genai(monkeypatch, generate_content):
     monkeypatch.setitem(sys.modules, "google.genai.errors", fake_errors)
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
     monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
+    # A developer's .env may override the models (and other tests load the
+    # real .env), so start every fake-Gemini test from the defaults.
+    monkeypatch.delenv("GEMINI_PRIMARY_MODEL", raising=False)
+    monkeypatch.delenv("GEMINI_FALLBACK_MODEL", raising=False)
 
 
 class FakeResponse:
@@ -373,3 +377,37 @@ def test_ask_rejects_cannot_answer_before_database_execution(monkeypatch):
 
     with pytest.raises(SQLValidationError, match="could not answer"):
         ask(FakePool(), "Ask something unsupported")
+
+def test_model_names_can_be_overridden_from_environment(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        if model == "custom-primary":
+            raise FakeServerError(503)
+        return FakeResponse("SELECT id FROM Users;")
+
+    _install_fake_genai(monkeypatch, generate_content)
+    monkeypatch.setenv("GEMINI_PRIMARY_MODEL", "custom-primary")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "custom-fallback")
+    from nl_to_sql import generate_sql
+
+    assert generate_sql("Show me the users") == "SELECT id FROM Users;"
+    assert calls == ["custom-primary", "custom-fallback"]
+
+
+def test_blank_model_override_falls_back_to_default(monkeypatch):
+    calls = []
+
+    def generate_content(model, contents):
+        calls.append(model)
+        return FakeResponse("SELECT id FROM Users;")
+
+    _install_fake_genai(monkeypatch, generate_content)
+    # "GEMINI_PRIMARY_MODEL=" in .env loads as an empty string.
+    monkeypatch.setenv("GEMINI_PRIMARY_MODEL", "")
+    from nl_to_sql import generate_sql
+
+    generate_sql("Show me the users")
+
+    assert calls == ["gemini-flash-latest"]
