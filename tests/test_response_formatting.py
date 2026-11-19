@@ -4,7 +4,7 @@ from decimal import Decimal
 import psycopg
 import pytest
 
-from nl_to_sql import LLMUnavailableError
+from nl_to_sql import LLMUnavailableError, QueryResult
 from response_formatting import (
     CANNOT_ANSWER_MESSAGE,
     LLM_UNAVAILABLE_MESSAGE,
@@ -137,13 +137,16 @@ def test_format_error_hides_policy_details_but_logs_them(caplog):
     assert "PG_SLEEP" in caplog.text
 
 
+FAKE_SQL = "SELECT name, total_paid FROM Users"
+
+
 def _fake_ask(monkeypatch, result):
-    def ask(_pool, _question):
+    def run_query(_pool, _question):
         if isinstance(result, Exception):
             raise result
-        return result
+        return QueryResult(FAKE_SQL, result)
 
-    monkeypatch.setattr("response_formatting.ask", ask)
+    monkeypatch.setattr("response_formatting.run_query", run_query)
 
 
 def test_answer_formats_rows(monkeypatch):
@@ -219,3 +222,50 @@ def test_rows_without_balances_are_unchanged():
     rows = [{"name": "Ishan", "total_paid": Decimal("3000")}]
 
     assert _describe_balances(rows) == rows
+
+
+# --- Phase 8 task 4: the phrasing step sees the SQL ------------------------
+
+ALIASED_ROWS = [
+    {"name": "Priya", "amount_to_pay": Decimal("1300.00")},
+    {"name": "Alex", "amount_to_pay": Decimal("400.00")},
+]
+ALIASED_SQL = (
+    "SELECT name, ABS(net_balance) AS amount_to_pay FROM net_balances "
+    "WHERE net_balance < 0"
+)
+
+
+def test_phrasing_prompt_includes_sql_when_given(monkeypatch):
+    prompts = _fake_llm(monkeypatch, "Priya owes 1300.00 and Alex owes 400.00.")
+
+    format_answer("Who owes money?", ALIASED_ROWS, sql=ALIASED_SQL)
+
+    assert ALIASED_SQL in prompts[0]
+
+
+def test_phrasing_prompt_omits_sql_section_without_sql(monkeypatch):
+    prompts = _fake_llm(monkeypatch, "Priya owes 1300.00 and Alex owes 400.00.")
+
+    format_answer("Who owes money?", ALIASED_ROWS)
+
+    assert "Query:" not in prompts[0]
+
+
+def test_numbers_only_in_sql_are_still_rejected(monkeypatch):
+    # The SQL explains labels; it is not a source of answer numbers.
+    # "0" appears in the SQL (net_balance < 0) but in no row.
+    _fake_llm(monkeypatch, "0 people are settled; Priya owes 1300.00.")
+
+    answer = format_answer("Who owes money?", ALIASED_ROWS, sql=ALIASED_SQL)
+
+    assert answer.startswith("name: Priya, amount_to_pay: 1300.00")
+
+
+def test_answer_passes_sql_to_phrasing(monkeypatch):
+    _fake_ask(monkeypatch, ALIASED_ROWS)
+    prompts = _fake_llm(monkeypatch, "Priya owes 1300.00 and Alex owes 400.00.")
+
+    answer(object(), "Who owes money?")
+
+    assert FAKE_SQL in prompts[0]

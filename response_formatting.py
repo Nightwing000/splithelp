@@ -7,7 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import psycopg
 
-from nl_to_sql import LLMUnavailableError, ask, generate_text
+from nl_to_sql import LLMUnavailableError, generate_text, run_query
 from sql_validation import CannotAnswerError, SQLValidationError
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,11 @@ def _describe_balances(rows: list[dict]) -> list[dict]:
     return described
 
 
-def format_answer(question: str, rows: list[dict] | None) -> str:
+def format_answer(
+    question: str,
+    rows: list[dict] | None,
+    sql: str | None = None,
+) -> str:
     """Turn validated query results into a user-facing answer."""
     # ask() returns None only for a statement with no result set, which the
     # validator should make impossible; treat it like an empty result
@@ -161,11 +165,13 @@ def format_answer(question: str, rows: list[dict] | None) -> str:
     # The rows are already fetched, so a failed phrasing call (quota,
     # network) should degrade to the plain listing, not lose the answer.
     try:
-        answer = generate_text(build_phrasing_prompt(question, rows_text)).strip()
+        answer = generate_text(build_phrasing_prompt(question, rows_text, sql)).strip()
     except Exception:
         logger.exception("Answer phrasing failed; returning plain rows.")
         return rows_text
 
+    # The SQL is deliberately not a source of allowed numbers: it explains
+    # labels, and its literals (e.g. "< 0") are not answers.
     invented = _numbers_in(answer) - _numbers_in(rows_text) - _numbers_in(question)
     if not answer or invented:
         logger.warning("Phrased answer introduced numbers %s; returning plain rows.", invented)
@@ -180,11 +186,18 @@ def _rows_to_text(rows: list[dict]) -> str:
     )
 
 
-def build_phrasing_prompt(question: str, rows_text: str) -> str:
+def build_phrasing_prompt(question: str, rows_text: str, sql: str | None = None) -> str:
+    # Only the label meanings come from the SQL; rule 8 still forbids
+    # mentioning it in the answer.
+    query_section = (
+        f"\nQuery: (use it only to understand what each label means)\n{sql}\n"
+        if sql
+        else ""
+    )
     return f"""{PHRASING_INSTRUCTIONS}
 
 Question: {question}
-
+{query_section}
 Rows:
 {rows_text}
 
@@ -216,7 +229,7 @@ def answer(pool, question: str) -> str:
     # Only ask() is guarded: format_answer handles its own LLM failures, and
     # a bug there must not be disguised as a rejected query.
     try:
-        rows = ask(pool, question)
+        sql, rows = run_query(pool, question)
     except SQLValidationError as exc:
         return format_error(exc)
     except psycopg.errors.QueryCanceled:
@@ -227,6 +240,6 @@ def answer(pool, question: str) -> str:
         # No rows exist yet, so unlike phrasing there is nothing to fall back to.
         logger.exception("SQL generation failed for question: %s", question)
         return LLM_UNAVAILABLE_MESSAGE
-    return format_answer(question, rows)
+    return format_answer(question, rows, sql)
 
 

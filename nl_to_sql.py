@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path
 from collections.abc import Sequence
+from typing import NamedTuple
 
 from psycopg_pool import ConnectionPool
 
@@ -154,13 +155,27 @@ def get_read_only_pool() -> ConnectionPool:
     return ConnectionPool(conninfo, open=True)
 
 
-def ask(pool, question: str) -> list[dict] | None:
+class QueryResult(NamedTuple):
+    sql: str
+    rows: list[dict] | None
+
+
+def run_query(pool, question: str) -> QueryResult:
+    """Generate, validate and run SQL; return the SQL alongside the rows.
+
+    The phrasing step needs the SQL to know what computed labels mean
+    (e.g. that amount_to_pay is ABS(net_balance) for negative balances).
+    """
     sql = validate_read_only_sql(generate_sql(question))
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql)
             if cur.description is None:
-                return None
+                return QueryResult(sql, None)
             columns = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
-            return [dict(zip(columns, row)) for row in rows]
+            return QueryResult(sql, [dict(zip(columns, row)) for row in rows])
+
+
+def ask(pool, question: str) -> list[dict] | None:
+    return run_query(pool, question).rows

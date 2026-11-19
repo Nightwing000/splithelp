@@ -13,6 +13,7 @@ from nl_to_sql import (
     _extract_sql,
     ask,
     build_prompt,
+    run_query,
 )
 from retrieval import retrieve_context
 from sql_validation import SQLValidationError
@@ -316,6 +317,12 @@ def test_ask_returns_rows_as_dictionaries(monkeypatch):
         {"id": 1, "name": "Ishan"},
         {"id": 2, "name": "Alex"},
     ]
+
+    # run_query exposes the validated SQL too, for grounding the phrasing.
+    query = run_query(FakePool(), "Show me all users")
+
+    assert query.sql == "SELECT id, name FROM Users"
+    assert query.rows == result
 
 
 def test_ask_rejects_write_statement_before_database_execution(monkeypatch):
