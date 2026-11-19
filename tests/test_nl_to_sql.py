@@ -82,6 +82,9 @@ def test_build_prompt_includes_retrieved_context():
     # for owe/owed questions once all six tables were in the context.
     assert "filter on Groups.name and Users.name" in prompt
     assert "questions are about net balances" in prompt
+    # Live test: "each person's share of the fireworks expense" was
+    # CANNOT_ANSWER because nothing said expenses are found by description.
+    assert "match words in Expenses.description" in prompt
     assert "Active users have deleted_at IS NULL." in prompt
     assert "Question: List active users." in prompt
 

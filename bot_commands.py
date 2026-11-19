@@ -6,23 +6,28 @@ output can create or change a financial record.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
 from netting import simplify_debts
 from repositories.expense_repository import ExpensePayment, ExpenseSplit
 from repositories.user_repository import User
-from response_formatting import describe_balance, format_value
+from response_formatting import CURRENCY_SYMBOL, describe_balance, format_value
 from splitting import CENTS, allocate_equal
 
 NOT_AUTHORIZED_MESSAGE = (
     "Sorry, you're not set up to use this bot. Ask the group admin to add you."
 )
 ADD_USAGE = (
-    "Usage: /add <amount> <description> [@name ...]\n"
+    "Usage: /add <amount> <description> [@name ...] [+name:amount ...] "
+    "[on:YYYY-MM-DD] [at:Shop_Name]\n"
     "Example: /add 900 Dinner @alex @priya\n"
-    "With no names, the whole group splits it equally."
+    "Example: /add 4000 Fireworks +ishan:1080 on:2026-11-08 at:Cracker_Bazaar\n"
+    "With no @names, the whole group shares it. +name:amount charges that "
+    "person an extra amount alone (e.g. something they're sponsoring); the "
+    "rest is split equally. Use _ for spaces in the shop name."
 )
 SETTLE_USAGE = "Usage: /settle @name <amount>\nExample: /settle @ishan 400"
 HELP_TEXT = (
@@ -44,6 +49,10 @@ class AddCommand:
     amount: Decimal
     description: str
     names: list[str]
+    # Sponsored parts charged to one person only; the rest is split equally.
+    extras: dict[str, Decimal] = field(default_factory=dict)
+    spent_on: date | None = None
+    merchant: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,17 +81,57 @@ def _parse_name(token: str) -> str:
     return name
 
 
+def _parse_extra(token: str) -> tuple[str, Decimal]:
+    name, separator, amount = token.removeprefix("+").partition(":")
+    if not separator:
+        raise CommandError(f"'{token}' needs an amount, like +ishan:1080.")
+    return _parse_name(name), parse_amount(amount)
+
+
+def _parse_date(text: str) -> date:
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise CommandError(f"'{text}' is not a date; use YYYY-MM-DD.") from None
+
+
 def parse_add(args: list[str]) -> AddCommand:
     if len(args) < 2:
         raise CommandError(ADD_USAGE)
     amount = parse_amount(args[0])
-    words = [token for token in args[1:] if not token.startswith("@")]
-    names = [_parse_name(token) for token in args[1:] if token.startswith("@")]
+
+    words: list[str] = []
+    names: list[str] = []
+    extras: dict[str, Decimal] = {}
+    spent_on: date | None = None
+    merchant: str | None = None
+    for token in args[1:]:
+        if token.startswith("@"):
+            names.append(_parse_name(token))
+        elif token.startswith("+"):
+            name, extra = _parse_extra(token)
+            if name in extras:
+                raise CommandError(f"{name} has more than one +amount.")
+            extras[name] = extra
+        elif token.startswith("on:"):
+            if spent_on is not None:
+                raise CommandError("Give only one on:date.")
+            spent_on = _parse_date(token.removeprefix("on:"))
+        elif token.startswith("at:"):
+            merchant = token.removeprefix("at:").replace("_", " ").strip()
+            if not merchant:
+                raise CommandError("at: needs a shop name, like at:Cracker_Bazaar.")
+        else:
+            words.append(token)
+
     if not words:
         raise CommandError(ADD_USAGE)
     if len(names) != len(set(names)):
         raise CommandError("Each person can only be listed once.")
-    return AddCommand(amount, " ".join(words), names)
+    # Equal to the total is allowed: a fully sponsored bill has no shared part.
+    if sum(extras.values(), Decimal("0")) > amount:
+        raise CommandError("The +amounts add up to more than the bill.")
+    return AddCommand(amount, " ".join(words), names, extras, spent_on, merchant)
 
 
 def parse_settle(args: list[str]) -> SettleCommand:
@@ -104,6 +153,10 @@ def parse_telegram_users(value: str) -> dict[int, int]:
             raise ValueError(f"Bad TELEGRAM_USERS entry {entry!r}; expected telegram_id:user_id")
         mapping[int(telegram_id)] = int(user_id)
     return mapping
+
+
+def _money(amount: Decimal) -> str:
+    return f"{CURRENCY_SYMBOL}{format_value(amount)}"
 
 
 def _with_usage(exc: CommandError, usage: str) -> str:
@@ -156,23 +209,40 @@ class SplitHelpService:
                 if command.names
                 else members
             )
+            sponsors = {name: self._find_member(members, name) for name in command.extras}
         except CommandError as exc:
             return _with_usage(exc, ADD_USAGE)
 
-        shares = allocate_equal(command.amount, [member.id for member in sharers])
+        # Sponsored parts go to one person only; the rest is split equally.
+        # Each person still gets exactly one split row (UNIQUE per expense).
+        shared = command.amount - sum(command.extras.values(), Decimal("0"))
+        shares: dict[int, Decimal] = (
+            allocate_equal(shared, [member.id for member in sharers]) if shared > 0 else {}
+        )
+        for name, extra in command.extras.items():
+            user_id = sponsors[name].id
+            shares[user_id] = shares.get(user_id, Decimal("0")) + extra
+        # amount_owed always stores the resolved amount; a mixed rule isn't
+        # a pure equal split, so those rows are typed 'exact'.
+        split_type = "exact" if command.extras else "equal"
+
         self.expenses.create_expense(
             self.group_id,
             command.description,
             [ExpensePayment(sender.id, command.amount)],
-            [ExpenseSplit(user_id, "equal", share) for user_id, share in shares.items()],
+            [ExpenseSplit(user_id, split_type, share) for user_id, share in shares.items()],
+            spent_on=command.spent_on,
+            merchant=command.merchant,
         )
-        names = {member.id: member.name for member in sharers}
+        names = {member.id: member.name for member in members}
         breakdown = ", ".join(
-            f"{names[user_id]} {format_value(share)}" for user_id, share in shares.items()
+            f"{names[user_id]} {_money(share)}" for user_id, share in shares.items()
         )
+        where = f" at {command.merchant}" if command.merchant else ""
+        when = f" on {command.spent_on.isoformat()}" if command.spent_on else ""
         return (
-            f"Added {command.description}: {format_value(command.amount)} "
-            f"paid by {sender.name}. Shares: {breakdown}."
+            f"Added {command.description}: {_money(command.amount)} "
+            f"paid by {sender.name}{where}{when}. Shares: {breakdown}."
         )
 
     def settle(self, telegram_id: int, args: list[str]) -> str:
@@ -196,7 +266,7 @@ class SplitHelpService:
             [ExpensePayment(sender.id, command.amount)],
             [ExpenseSplit(recipient.id, "exact", command.amount)],
         )
-        return f"Recorded: {sender.name} paid {recipient.name} {format_value(command.amount)}."
+        return f"Recorded: {sender.name} paid {recipient.name} {_money(command.amount)}."
 
     def balances(self, telegram_id: int) -> str:
         sender, members = self._sender_and_members(telegram_id)
@@ -206,7 +276,7 @@ class SplitHelpService:
         balances = self.expenses.get_group_balances(self.group_id)
         names = {member.id: member.name for member in members}
         lines = [
-            f"{member.name} {describe_balance(balances.get(member.id, Decimal('0')))}"
+            f"{member.name} {describe_balance(balances.get(member.id, Decimal('0')), CURRENCY_SYMBOL)}"
             for member in sorted(members, key=lambda member: member.name.lower())
         ]
         payments = simplify_debts(balances)
@@ -214,7 +284,7 @@ class SplitHelpService:
             lines.append("\nSuggested payments:")
             lines.extend(
                 f"{names.get(p.payer_id, p.payer_id)} pays "
-                f"{names.get(p.payee_id, p.payee_id)} {format_value(p.amount)}"
+                f"{names.get(p.payee_id, p.payee_id)} {_money(p.amount)}"
                 for p in payments
             )
         else:

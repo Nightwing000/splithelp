@@ -38,6 +38,7 @@ Treat literal values in examples as placeholders and use values from the user's 
 Never alias a computed value with the name of an existing schema column; for example, name ABS(net_balance) amount_to_pay, not amount_owed.
 Group and person names in the question (such as "Goa Trip" or "Alex") are values: filter on Groups.name and Users.name, joining to get the ids.
 "Owe" and "owed" questions are about net balances; use the net balance calculation from the context.
+To find a specific expense ("the fireworks expense"), match words in Expenses.description with ILIKE; for where or when, use Expenses.merchant and Expenses.spent_on.
 If the question cannot be answered from the supplied context, return exactly CANNOT_ANSWER."""
 
 

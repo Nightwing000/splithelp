@@ -122,3 +122,20 @@ def test_balance_questions_get_every_table_a_balance_needs(question):
     ids = {item["id"] for item in retrieve_context(question)}
 
     assert {"users", "expenses", "expense_payments", "expense_splits", "group_members"} <= ids
+
+
+def test_expense_share_question_retrieves_share_example():
+    ids = [
+        item["id"]
+        for item in retrieve_context(
+            "What was each person's share of the fireworks expense in the Diwali Crackers group?"
+        )
+    ]
+
+    assert "expense_shares" in ids
+
+
+def test_date_and_merchant_questions_retrieve_expense_details_rule():
+    ids = [item["id"] for item in retrieve_context("What did we spend at Cracker Bazaar in November?")]
+
+    assert "expense_dates_and_merchants" in ids

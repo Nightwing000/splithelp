@@ -4,20 +4,28 @@ A group expense splitter you can talk to. Record shared expenses from a
 Telegram chat, and ask questions about them in plain English:
 
 ```
-/add 900 Dinner @alex @priya
-→ Added Dinner: 900.00 paid by Ishan. Shares: Alex 450.00, Priya 450.00.
+/add 4000 Fireworks +ishan:1080 on:2026-11-08 at:Cracker_Bazaar
+→ Ishan pays ₹4000; ₹1080 of sky shots is his alone, the other ₹2920 is
+  split equally between the 5 members.
+  Shares: Ishan ₹1664.00, rahul ₹584.00, krish ₹584.00, jaffer ₹584.00, sush ₹584.00
 
 /balances
-→ Alex owes 150.00
-  Ishan is owed 1633.33
-  Priya owes 1483.33
+→ Ishan is owed ₹2336.00
+  jaffer owes ₹584.00
+  krish owes ₹584.00
+  rahul owes ₹584.00
+  sush owes ₹584.00
 
   Suggested payments:
-  Priya pays Ishan 1483.33
-  Alex pays Ishan 150.00
+  krish pays Ishan ₹584.00
+  jaffer pays Ishan ₹584.00
+  rahul pays Ishan ₹584.00
+  sush pays Ishan ₹584.00
 
-Who owes money in the Goa Trip group?
-→ In the Goa Trip group, Priya owes 1483.33 and Alex owes 150.00.
+What was each person's share of the fireworks expense in the Diwali Crackers group?
+→ For the fireworks expense in the Diwali Crackers group, Ishan's share is
+  ₹1664.00, rahul's share is ₹584.00, krish's share is ₹584.00, jaffer's share
+  is ₹584.00, and sush's share is ₹584.00.
 ```
 
 Questions are answered by an LLM (Gemini) that writes SQL. The SQL is
@@ -33,6 +41,19 @@ plain code ([bot_commands.py](bot_commands.py)), never by the LLM.
 
 - Equal splits are allocated in whole cents, so 100.00 between three people is
   stored as 33.34 / 33.33 / 33.33 ([splitting.py](splitting.py)).
+- `/add` options:
+
+  | Option | Meaning |
+  |---|---|
+  | `@name` | Who shares the bill. Leave it out and the whole group shares it. |
+  | `+name:amount` | A part charged to that person alone, e.g. something they're sponsoring. |
+  | `on:YYYY-MM-DD` | The date the money was spent. |
+  | `at:Shop_Name` | Where it was spent (`_` stands for a space). |
+
+  Every split row stores the resolved amount, so mixed bills still satisfy the
+  balance rule.
+- All amounts are in one currency (₹). Supporting several would need
+  exchange rates.
 - A settlement is stored as an expense the payer paid and the recipient owes,
   which moves both balances without a separate table.
 - PostgreSQL enforces that every expense balances (total paid = total split),
@@ -76,6 +97,7 @@ Requirements: Python 3.9+ and Docker.
 pip install -r requirements.txt
 cp .env.example .env                       # then fill in the values
 docker compose up -d                       # PostgreSQL with the schema
+python scripts/apply_migrations.py         # schema changes for older databases
 python scripts/setup_read_only_role.py     # create the read-only role
 python scripts/setup_read_only_role.py --verify
 python scripts/seed_demo.py                # optional demo group; prints its id
@@ -96,15 +118,18 @@ mode is turned off in BotFather (`/setprivacy`). Commands always work.
 pytest
 ```
 
-258 tests. The 7 tests that need the Docker database skip automatically when
+285 tests. The 12 tests that need the Docker database skip automatically when
 it isn't running, so CI (GitHub Actions) runs the rest on every push. Tests
 never call Gemini; a fake client stands in for it.
 
 ## Known limitations
 
 - **One group per bot instance** (`SPLITHELP_GROUP_ID`).
-- **Equal splits only from chat.** The schema supports `exact` and `shares`
-  splits, but the bot only creates equal ones.
+- **Splits from chat are equal, plus sponsored parts.** Splits by share ratio
+  ("2 shares for Alex") aren't supported in chat yet, though the schema allows
+  them.
+- **"We" can be read as "I":** the asker's name is added to every question, so
+  "what did *we* spend" may be filtered to the asker's own payments.
 - **Phrasing slips:** the LLM's wording can still slip, for example by
   mentioning a column name. The numbers are checked, but the prose isn't.
 - **Spelled-out numbers** ("two people") are not covered by the number check.

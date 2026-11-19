@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -108,9 +109,10 @@ class FakeExpenses:
         self.created = []
         self.balances = balances or {}
 
-    def create_expense(self, group_id, description, payments, splits):
+    def create_expense(self, group_id, description, payments, splits, spent_on=None, merchant=None):
         assert group_id == GROUP_ID
         self.created.append((description, payments, splits))
+        self.details = {"spent_on": spent_on, "merchant": merchant}
 
     def get_group_balances(self, group_id):
         return self.balances
@@ -235,11 +237,11 @@ def test_balances_are_described_in_words_with_suggested_payments():
 
     reply = make_service(expenses).balances(111)
 
-    assert "Ishan is owed 1766.66" in reply
-    assert "Alex owes 433.33" in reply
-    assert "Priya owes 1333.33" in reply
-    assert "Priya pays Ishan 1333.33" in reply
-    assert "Alex pays Ishan 433.33" in reply
+    assert "Ishan is owed ₹1766.66" in reply
+    assert "Alex owes ₹433.33" in reply
+    assert "Priya owes ₹1333.33" in reply
+    assert "Priya pays Ishan ₹1333.33" in reply
+    assert "Alex pays Ishan ₹433.33" in reply
     assert "-" not in reply
 
 
@@ -276,3 +278,119 @@ def test_identity_note_pulls_users_schema_into_retrieval():
     )
 
     assert "users" in [item["id"] for item in retrieve_context(asked[0])]
+
+
+
+# --- sponsored parts, dates, merchants, currency ------------------------------
+
+
+def test_parse_add_with_sponsored_part_date_and_merchant():
+    command = parse_add(
+        ["4000", "Fireworks", "+Ishan:1080", "on:2026-11-08", "at:Cracker_Bazaar"]
+    )
+
+    assert command == AddCommand(
+        Decimal("4000"),
+        "Fireworks",
+        [],
+        extras={"ishan": Decimal("1080")},
+        spent_on=date(2026, 11, 8),
+        merchant="Cracker Bazaar",
+    )
+
+
+def test_parse_add_defaults_have_no_extras_date_or_merchant():
+    command = parse_add(["90", "Fuel"])
+
+    assert command.extras == {}
+    assert command.spent_on is None
+    assert command.merchant is None
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["4000", "Fireworks", "+ishan"],  # no amount
+        ["4000", "Fireworks", "+ishan:lots"],  # bad amount
+        ["4000", "Fireworks", "+:100"],  # no name
+        ["4000", "Fireworks", "+ishan:100", "+ishan:200"],  # same sponsor twice
+        ["1000", "Fireworks", "+ishan:1080"],  # sponsored part exceeds the bill
+        ["4000", "Fireworks", "on:2026-13-40"],  # not a date
+        ["4000", "Fireworks", "on:2026-11-08", "on:2026-11-09"],  # two dates
+        ["4000", "Fireworks", "at:"],  # empty merchant
+    ],
+)
+def test_parse_add_rejects_bad_extras_dates_and_merchants(args):
+    with pytest.raises(CommandError):
+        parse_add(args)
+
+
+def test_add_sponsored_part_goes_only_to_sponsor_rest_split_equally():
+    # The Diwali Crackers bill, in a 3-person group: Ishan sponsors 1080 of
+    # sky shots alone; the remaining 2920 is split equally.
+    expenses = FakeExpenses()
+
+    reply = make_service(expenses).add_expense(
+        111, ["4000", "Fireworks", "+ishan:1080", "on:2026-11-08", "at:Cracker_Bazaar"]
+    )
+
+    _, payments, splits = expenses.created[0]
+    assert [(p.user_id, p.amount) for p in payments] == [(ISHAN.id, Decimal("4000"))]
+    assert {s.user_id: s.amount_owed for s in splits} == {
+        ISHAN.id: Decimal("2053.34"),  # 1080 + 973.34
+        ALEX.id: Decimal("973.33"),
+        PRIYA.id: Decimal("973.33"),
+    }
+    # Mixed rule: amount_owed stores the resolved amount, typed 'exact'.
+    assert all(s.split_type == "exact" for s in splits)
+    assert sum(s.amount_owed for s in splits) == Decimal("4000")
+    assert expenses.details == {"spent_on": date(2026, 11, 8), "merchant": "Cracker Bazaar"}
+    assert "₹4000.00" in reply
+    assert "Cracker Bazaar" in reply
+
+
+def test_add_fully_sponsored_bill_has_no_equal_part():
+    expenses = FakeExpenses()
+
+    make_service(expenses).add_expense(111, ["1080", "Sky", "shots", "+ishan:1080"])
+
+    _, _, splits = expenses.created[0]
+    assert [(s.user_id, s.amount_owed) for s in splits] == [(ISHAN.id, Decimal("1080"))]
+
+
+def test_sponsor_can_be_outside_the_named_sharers():
+    expenses = FakeExpenses()
+
+    make_service(expenses).add_expense(111, ["300", "Snacks", "@alex", "@priya", "+ishan:100"])
+
+    _, _, splits = expenses.created[0]
+    assert {s.user_id: s.amount_owed for s in splits} == {
+        ISHAN.id: Decimal("100"),
+        ALEX.id: Decimal("100.00"),
+        PRIYA.id: Decimal("100.00"),
+    }
+
+
+def test_add_with_unknown_sponsor_creates_nothing():
+    expenses = FakeExpenses()
+
+    reply = make_service(expenses).add_expense(111, ["4000", "Fireworks", "+bob:1080"])
+
+    assert "bob" in reply.lower()
+    assert expenses.created == []
+
+
+def test_plain_add_still_uses_equal_split_type():
+    expenses = FakeExpenses()
+
+    make_service(expenses).add_expense(111, ["90", "Fuel"])
+
+    _, _, splits = expenses.created[0]
+    assert all(s.split_type == "equal" for s in splits)
+    assert expenses.details == {"spent_on": None, "merchant": None}
+
+
+def test_settle_reply_shows_currency():
+    reply = make_service().settle(222, ["@ishan", "400"])
+
+    assert "₹400.00" in reply

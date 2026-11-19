@@ -49,6 +49,10 @@ CREATE TABLE Expenses (
     id BIGSERIAL PRIMARY KEY,
     group_id BIGINT NOT NULL,
     description VARCHAR(255) NOT NULL,
+    -- When the money was spent, as opposed to created_at (when it was
+    -- recorded); "Diwali shopping on 8 Nov" may be entered days later.
+    spent_on DATE NOT NULL DEFAULT CURRENT_DATE,
+    merchant VARCHAR(255) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (group_id)

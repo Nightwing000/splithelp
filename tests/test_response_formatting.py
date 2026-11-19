@@ -7,6 +7,7 @@ import pytest
 
 from nl_to_sql import LLMUnavailableError, QueryResult
 from response_formatting import (
+    PHRASING_INSTRUCTIONS,
     CANNOT_ANSWER_MESSAGE,
     DATABASE_UNAVAILABLE_MESSAGE,
     LLM_UNAVAILABLE_MESSAGE,
@@ -306,3 +307,25 @@ def test_role_blocking_a_validated_query_is_logged_as_an_error(monkeypatch, capl
         record.levelname == "ERROR" and "read-only role" in record.getMessage()
         for record in caplog.records
     )
+
+
+
+def test_describe_balance_with_currency_symbol():
+    assert describe_balance(Decimal("-584"), "₹") == "owes ₹584.00"
+    assert describe_balance(Decimal("2336"), "₹") == "is owed ₹2336.00"
+    assert describe_balance(Decimal("0"), "₹") == "is settled up"
+
+
+def test_phrasing_prompt_states_the_currency():
+    assert "₹" in PHRASING_INSTRUCTIONS
+    assert "Do not add currency symbols" not in PHRASING_INSTRUCTIONS
+
+
+def test_rupee_amounts_pass_the_number_check(monkeypatch):
+    _fake_llm(monkeypatch, "Rahul owes ₹584.00 and Ishan is owed ₹2,336.00.")
+    rows = [
+        {"name": "Ishan", "net_balance": Decimal("2336")},
+        {"name": "rahul", "net_balance": Decimal("-584")},
+    ]
+
+    assert format_answer("Who owes money?", rows) == "Rahul owes ₹584.00 and Ishan is owed ₹2,336.00."

@@ -88,7 +88,8 @@ KNOWLEDGE_ITEMS = [
         "content": (
             "Expenses records expenses that belong to a group. "
             "Important columns: id (primary key), group_id, description, "
-            "and created_at. "
+            "spent_on (DATE the money was spent), merchant (shop or place, "
+            "may be NULL), and created_at (when the row was recorded). "
             "Join Expenses.group_id to Groups.id. "
             "Join ExpensePayments.expense_id and "
             "ExpenseSplits.expense_id to Expenses.id to find who paid "
@@ -97,6 +98,7 @@ KNOWLEDGE_ITEMS = [
         "keywords": [
             "expense", "expenses", "cost", "purchase",
             "description", "group", "spending", "payment", "paid",
+            "date", "when", "merchant", "shop", "store", "spent", "bought",
         ],
     },
     {
@@ -164,6 +166,23 @@ BUSINESS_RULES = [
         "keywords": [
             "debtor", "owes", "owing", "pay", "negative balance",
             "who owes money", "amount owed",
+        ],
+    },
+    {
+        "id": "expense_dates_and_merchants",
+        "kind": "rule",
+        "content": (
+            "Use Expenses.spent_on for when money was spent (dates, months, "
+            "'in November', 'last week'); created_at is only when the row was "
+            "recorded. Use Expenses.merchant for where it was spent ('at "
+            "Cracker Bazaar'), matching case-insensitively with ILIKE. "
+            "Find a specific expense by matching words in Expenses.description "
+            "with ILIKE, e.g. description ILIKE '%fireworks%'. All amounts "
+            "are in one currency, Indian rupees."
+        ),
+        "keywords": [
+            "date", "when", "month", "november", "week", "spent", "merchant",
+            "shop", "store", "bought", "at", "rupees", "description",
         ],
     },
     {
@@ -294,6 +313,26 @@ SQL_EXAMPLES = [
         ),
         "keywords": [
             "paid", "payment", "payments", "total", "payer", "group",
+        ],
+    },
+    {
+        "id": "expense_shares",
+        "kind": "example",
+        "content": (
+            "Question: What was each person's share of the dinner expense "
+            "in the Goa Trip group?\n"
+            "SQL:\n"
+            "SELECT u.name, e.description, es.amount_owed AS share "
+            "FROM ExpenseSplits es "
+            "JOIN Expenses e ON e.id = es.expense_id "
+            "JOIN Groups g ON g.id = e.group_id "
+            "JOIN Users u ON u.id = es.user_id "
+            "WHERE g.name = 'Goa Trip' AND e.description ILIKE '%dinner%' "
+            "ORDER BY share DESC;"
+        ),
+        "keywords": [
+            "share", "shares", "each", "person", "split", "expense",
+            "portion", "part",
         ],
     },
     {

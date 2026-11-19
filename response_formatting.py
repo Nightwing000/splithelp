@@ -46,8 +46,9 @@ person paid toward expenses. amount_owed is that person's share of one expense, 
 not a debt they still have to pay. Other labels, such as amount_to_pay, were \
 computed for this question; read them by their plain meaning. The rows were \
 already filtered to match the question, so do not reject them just because a \
-label is worded differently from the question. Do not add currency symbols or \
-units; the app does not record a currency.
+label is worded differently from the question. All amounts are in Indian \
+rupees; you may write them with ₹ (for example ₹584.00), but never change the \
+number.
 
 5. Do not suggest who should pay whom or how to settle up unless the rows list \
 those payments. Working that out is arithmetic, and the app does it separately.
@@ -93,6 +94,8 @@ QUERY_FAILED_MESSAGE = (
     "Something went wrong while looking that up. Please try rephrasing it."
 )
 CENTS = Decimal("0.01")
+# One currency per deployment: multi-currency would need exchange rates.
+CURRENCY_SYMBOL = "₹"
 # Positive means the user is owed money, negative means they owe it
 # (knowledge_base.py positive_balance / negative_balance rules).
 BALANCE_COLUMN = "net_balance"
@@ -114,13 +117,13 @@ def format_value(value) -> str:
     return str(value)
 
 
-def describe_balance(balance: Decimal) -> str:
+def describe_balance(balance: Decimal, symbol: str = "") -> str:
     # Rounded first, so the direction always matches the displayed amount.
     amount = balance.quantize(CENTS, rounding=ROUND_HALF_UP)
     if amount < 0:
-        return f"owes {format_value(-amount)}"
+        return f"owes {symbol}{format_value(-amount)}"
     if amount > 0:
-        return f"is owed {format_value(amount)}"
+        return f"is owed {symbol}{format_value(amount)}"
     return "is settled up"
 
 

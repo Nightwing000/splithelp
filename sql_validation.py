@@ -31,7 +31,7 @@ ALLOWED_COLUMNS = {
     "users": {"id", "name", "email", "created_at", "deleted_at"},
     "groups": {"id", "name", "created_by", "created_at"},
     "groupmembers": {"group_id", "user_id", "joined_at"},
-    "expenses": {"id", "group_id", "description", "created_at"},
+    "expenses": {"id", "group_id", "description", "spent_on", "merchant", "created_at"},
     "expensepayments": {"id", "expense_id", "user_id", "amount"},
     "expensesplits": {
         "id",

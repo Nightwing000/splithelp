@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import psycopg
@@ -30,6 +30,8 @@ class Expense:
     group_id: int
     description: str
     created_at: datetime
+    spent_on: date | None = None
+    merchant: str | None = None
     payments: list[ExpensePayment] = field(default_factory=list)
     splits: list[ExpenseSplit] = field(default_factory=list)
 
@@ -52,14 +54,19 @@ class ExpenseRepository:
         description: str,
         payments: list[ExpensePayment],
         splits: list[ExpenseSplit],
+        spent_on: date | None = None,
+        merchant: str | None = None,
     ) -> Expense:
         try:
             with self.pool.connection() as conn:
                 with conn.cursor() as cur:
+                    # COALESCE keeps the column default (today) when no
+                    # date is given, instead of inserting NULL.
                     cur.execute(
-                        "INSERT INTO Expenses (group_id, description) VALUES (%s, %s) "
-                        "RETURNING id, group_id, description, created_at;",
-                        (group_id, description),
+                        "INSERT INTO Expenses (group_id, description, spent_on, merchant) "
+                        "VALUES (%s, %s, COALESCE(%s, CURRENT_DATE), %s) "
+                        "RETURNING id, group_id, description, created_at, spent_on, merchant;",
+                        (group_id, description, spent_on, merchant),
                     )
                     row = cur.fetchone()
                     expense = Expense(
@@ -67,6 +74,8 @@ class ExpenseRepository:
                         group_id=row[1],
                         description=row[2],
                         created_at=row[3],
+                        spent_on=row[4],
+                        merchant=row[5],
                     )
 
                     for payment in payments:
@@ -100,7 +109,7 @@ class ExpenseRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, group_id, description, created_at
+                    SELECT id, group_id, description, created_at, spent_on, merchant
                     FROM Expenses
                     WHERE id = %s;
                     """,
@@ -117,6 +126,8 @@ class ExpenseRepository:
                     group_id=row[1],
                     description=row[2],
                     created_at=row[3],
+                    spent_on=row[4],
+                    merchant=row[5],
                 )
 
                 cur.execute(
@@ -172,7 +183,7 @@ class ExpenseRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, group_id, description, created_at
+                    SELECT id, group_id, description, created_at, spent_on, merchant
                     FROM Expenses
                     WHERE group_id = %s
                     ORDER BY created_at DESC;
@@ -188,6 +199,8 @@ class ExpenseRepository:
                         group_id=row[1],
                         description=row[2],
                         created_at=row[3],
+                        spent_on=row[4],
+                        merchant=row[5],
                     )
                     for row in rows
                 ]
