@@ -12,7 +12,10 @@ from response_formatting import (
     NO_RESULTS_MESSAGE,
     REJECTED_QUERY_MESSAGE,
     TIMEOUT_MESSAGE,
+    _describe_balance,
+    _describe_balances,
     _format_value,
+    _rows_to_text,
     answer,
     format_answer,
     format_error,
@@ -76,7 +79,7 @@ def test_format_answer_phrases_multi_row_results(monkeypatch):
     answer = format_answer("Who owes money in group 1?", BALANCE_ROWS)
 
     assert answer == "Ishan is owed 1,250.00 and Alex owes 1250.00 in group 1."
-    assert "name: Ishan, net_balance: 1250.00" in prompts[0]
+    assert "name: Ishan, balance: is owed 1250.00" in prompts[0]
     assert "Who owes money in group 1?" in prompts[0]
 
 
@@ -87,8 +90,8 @@ def test_format_answer_rejects_invented_numbers(monkeypatch):
     answer = format_answer("Who owes money?", BALANCE_ROWS)
 
     assert answer == (
-        "name: Ishan, net_balance: 1250.00\n"
-        "name: Alex, net_balance: -1250.00"
+        "name: Ishan, balance: is owed 1250.00\n"
+        "name: Alex, balance: owes 1250.00"
     )
 
 
@@ -97,7 +100,7 @@ def test_format_answer_falls_back_when_llm_fails(monkeypatch):
 
     answer = format_answer("Who owes money?", BALANCE_ROWS)
 
-    assert answer.startswith("name: Ishan, net_balance: 1250.00")
+    assert answer.startswith("name: Ishan, balance: is owed 1250.00")
 
 
 def test_format_answer_falls_back_on_empty_llm_reply(monkeypatch):
@@ -169,3 +172,50 @@ def test_answer_does_not_hide_unexpected_errors(monkeypatch):
 
     with pytest.raises(KeyError):
         answer(object(), "Who owes money?")
+
+
+# --- Phase 8 task 3: signs are resolved in Python, not by the LLM ---------
+
+
+@pytest.mark.parametrize(
+    ("balance", "expected"),
+    [
+        (Decimal("-400"), "owes 400.00"),
+        (Decimal("1766.66"), "is owed 1766.66"),
+        (Decimal("0"), "is settled up"),
+        (Decimal("-0.005"), "owes 0.01"),
+    ],
+)
+def test_describe_balance(balance, expected):
+    assert _describe_balance(balance) == expected
+
+
+def test_prompt_never_contains_a_signed_balance(monkeypatch):
+    prompts = _fake_llm(monkeypatch, "Alex owes 1250.00.")
+
+    format_answer("Who owes money?", BALANCE_ROWS)
+
+    assert "balance: owes 1250.00" in prompts[0]
+    assert "-1250.00" not in prompts[0]
+    assert "net_balance:" not in prompts[0]
+
+
+def test_single_balance_value_is_described():
+    rows = [{"net_balance": Decimal("-433.33")}]
+
+    assert format_answer("What is Alex's balance?", rows) == "balance: owes 433.33"
+
+
+def test_balance_of_none_is_left_alone():
+    rows = [{"name": "Ishan", "net_balance": None}, {"name": "Alex", "net_balance": None}]
+
+    assert _rows_to_text(_describe_balances(rows)) == (
+        "name: Ishan, balance: none\n"
+        "name: Alex, balance: none"
+    )
+
+
+def test_rows_without_balances_are_unchanged():
+    rows = [{"name": "Ishan", "total_paid": Decimal("3000")}]
+
+    assert _describe_balances(rows) == rows

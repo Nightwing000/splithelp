@@ -33,12 +33,11 @@ could be wrong. Copy numbers exactly as they appear in the rows, including both 
 decimal places. If the question needs a number that isn't in the rows, say you \
 don't have it.
 
-3. Read balances this way: a positive net_balance means that person is OWED \
-money. A negative net_balance means that person OWES money, and you state the \
-absolute amount without a minus sign. A net_balance of 0.00 means they are \
-settled up.
-   Example: "name: Ravi, net_balance: -250.00" becomes "Ravi owes 250.00."
-   Example: "name: Asha, net_balance: 120.00" becomes "Asha is owed 120.00."
+3. Balances are already stated in words. Copy the direction exactly: "owes" \
+means that person owes money, "is owed" means they are owed money, and "is \
+settled up" means they owe nothing. Never swap or reword the direction.
+   Example: "name: Ravi, balance: owes 250.00" becomes "Ravi owes 250.00."
+   Example: "name: Asha, balance: is owed 120.00" becomes "Asha is owed 120.00."
 Balances belong to one group. If the rows cover several groups, keep each \
 group's balances separate and never combine them.
 
@@ -88,6 +87,9 @@ LLM_UNAVAILABLE_MESSAGE = (
     "I can't answer questions right now. Please try again in a few minutes."
 )
 CENTS = Decimal("0.01")
+# Positive means the user is owed money, negative means they owe it
+# (knowledge_base.py positive_balance / negative_balance rules).
+BALANCE_COLUMN = "net_balance"
 
 
 def _format_value(value) -> str:
@@ -106,6 +108,38 @@ def _format_value(value) -> str:
     return str(value)
 
 
+def _describe_balance(balance: Decimal) -> str:
+    # Rounded first, so the direction always matches the displayed amount.
+    amount = balance.quantize(CENTS, rounding=ROUND_HALF_UP)
+    if amount < 0:
+        return f"owes {_format_value(-amount)}"
+    if amount > 0:
+        return f"is owed {_format_value(amount)}"
+    return "is settled up"
+
+
+def _describe_balances(rows: list[dict]) -> list[dict]:
+    """Replace signed net_balance values with "owes X" / "is owed X".
+
+    The number check can't see a flipped sign (it ignores signs so that
+    "owes 250.00" matches -250.00), so the LLM must never interpret one.
+    """
+    if not any(BALANCE_COLUMN in row for row in rows):
+        return rows
+    described = []
+    for row in rows:
+        new_row = {}
+        for column, value in row.items():
+            if column == BALANCE_COLUMN:
+                new_row["balance"] = (
+                    _describe_balance(value) if isinstance(value, Decimal) else value
+                )
+            else:
+                new_row[column] = value
+        described.append(new_row)
+    return described
+
+
 def format_answer(question: str, rows: list[dict] | None) -> str:
     """Turn validated query results into a user-facing answer."""
     # ask() returns None only for a statement with no result set, which the
@@ -113,6 +147,8 @@ def format_answer(question: str, rows: list[dict] | None) -> str:
     # rather than crash.
     if not rows:
         return NO_RESULTS_MESSAGE
+
+    rows = _describe_balances(rows)
 
     if len(rows) == 1 and len(rows[0]) == 1:
         (column, value), = rows[0].items()
