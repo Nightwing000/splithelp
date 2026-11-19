@@ -98,7 +98,7 @@ CENTS = Decimal("0.01")
 BALANCE_COLUMN = "net_balance"
 
 
-def _format_value(value) -> str:
+def format_value(value) -> str:
     """Format values for display in responses."""
     if isinstance(value, Decimal):
         # Match Postgres ROUND() (halves away from zero), not Decimal's
@@ -114,13 +114,13 @@ def _format_value(value) -> str:
     return str(value)
 
 
-def _describe_balance(balance: Decimal) -> str:
+def describe_balance(balance: Decimal) -> str:
     # Rounded first, so the direction always matches the displayed amount.
     amount = balance.quantize(CENTS, rounding=ROUND_HALF_UP)
     if amount < 0:
-        return f"owes {_format_value(-amount)}"
+        return f"owes {format_value(-amount)}"
     if amount > 0:
-        return f"is owed {_format_value(amount)}"
+        return f"is owed {format_value(amount)}"
     return "is settled up"
 
 
@@ -138,7 +138,7 @@ def _describe_balances(rows: list[dict]) -> list[dict]:
         for column, value in row.items():
             if column == BALANCE_COLUMN:
                 new_row["balance"] = (
-                    _describe_balance(value) if isinstance(value, Decimal) else value
+                    describe_balance(value) if isinstance(value, Decimal) else value
                 )
             else:
                 new_row[column] = value
@@ -162,7 +162,7 @@ def format_answer(
 
     if len(rows) == 1 and len(rows[0]) == 1:
         (column, value), = rows[0].items()
-        return f"{column}: {_format_value(value)}"
+        return f"{column}: {format_value(value)}"
 
     rows_text = _rows_to_text(rows)
     if len(rows) > MAX_ROWS_FOR_LLM:
@@ -187,7 +187,7 @@ def format_answer(
 
 def _rows_to_text(rows: list[dict]) -> str:
     return "\n".join(
-        ", ".join(f"{column}: {_format_value(value)}" for column, value in row.items())
+        ", ".join(f"{column}: {format_value(value)}" for column, value in row.items())
         for row in rows
     )
 

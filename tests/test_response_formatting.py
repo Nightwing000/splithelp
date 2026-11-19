@@ -15,9 +15,9 @@ from response_formatting import (
     QUERY_FAILED_MESSAGE,
     REJECTED_QUERY_MESSAGE,
     TIMEOUT_MESSAGE,
-    _describe_balance,
+    describe_balance,
     _describe_balances,
-    _format_value,
+    format_value,
     _rows_to_text,
     answer,
     format_answer,
@@ -43,7 +43,7 @@ from sql_validation import CannotAnswerError, SQLValidationError, validate_read_
     ],
 )
 def test_format_value(value, expected):
-    assert _format_value(value) == expected
+    assert format_value(value) == expected
 
 
 @pytest.mark.parametrize("rows", [[], None])
@@ -193,7 +193,7 @@ def test_answer_does_not_hide_unexpected_errors(monkeypatch):
     ],
 )
 def test_describe_balance(balance, expected):
-    assert _describe_balance(balance) == expected
+    assert describe_balance(balance) == expected
 
 
 def test_prompt_never_contains_a_signed_balance(monkeypatch):
